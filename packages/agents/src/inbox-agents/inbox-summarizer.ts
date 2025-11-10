@@ -43,29 +43,71 @@ export class InboxSummarizer extends Agent {
   async runAgent(
     messages: Message[],
     userId: string,
-    sessionState?: SessionState,
-    persistState?: (
-      state: SessionState,
-      status?: SessionState["status"]
-    ) => Promise<void>,
-    onEvent?: AgentEventCallback
+    options?: {
+      sessionState?: SessionState;
+      persistState?: (
+        state: SessionState,
+        status?: SessionState["status"]
+      ) => Promise<void>;
+      onEvent?: AgentEventCallback;
+    }
   ): Promise<AgentResponseWithState> {
-    // Initialize or use provided session state
+    const { sessionState, persistState, onEvent } = options ?? {};
+    const state = this.initializeState(sessionState);
+    const saveState = this.createStatePersister(persistState);
+
+    // Run workflow steps until we reach free-chat
+    const workflowResult = await this.executeWorkflowSteps(
+      state,
+      userId,
+      onEvent,
+      saveState
+    );
+
+    if (workflowResult) {
+      return workflowResult;
+    }
+
+    // Execute free-chat phase
+    state.status = "active";
+    const chatResponse = await this.handleMessages(messages, userId, {
+      state,
+      persistState,
+      onEvent,
+    });
+
+    await saveState(state, state.status || "active");
+
+    return {
+      ...chatResponse,
+      sessionState: state,
+      status: state.status,
+    };
+  }
+
+  private initializeState(sessionState?: SessionState): SessionState {
     const state: SessionState = sessionState || {
       currentStep: 0,
       stepData: {},
       status: "active",
     };
 
-    // Restore custom system instructions if they exist in state
     if (state.stepData.systemInstructions) {
       this.updateConfig({
         systemInstructions: state.stepData.systemInstructions as string,
       });
     }
 
-    // Helper to persist state and handle errors
-    const saveState = async (
+    return state;
+  }
+
+  private createStatePersister(
+    persistState?: (
+      state: SessionState,
+      status?: SessionState["status"]
+    ) => Promise<void>
+  ) {
+    return async (
       stateToSave: SessionState,
       status?: SessionState["status"]
     ) => {
@@ -80,85 +122,118 @@ export class InboxSummarizer extends Agent {
         }
       }
     };
+  }
 
-    // Run workflow steps until we reach free-chat
+  private async executeWorkflowSteps(
+    state: SessionState,
+    userId: string,
+    onEvent: AgentEventCallback | undefined,
+    saveState: (
+      stateToSave: SessionState,
+      status?: SessionState["status"]
+    ) => Promise<void>
+  ): Promise<AgentResponseWithState | null> {
     let step = this.steps[state.currentStep];
+
     while (step && step !== "free-chat") {
-      // Check if step is already completed (idempotency check)
       if (this.isStepCompleted(step, state)) {
         state.currentStep += 1;
         step = this.steps[state.currentStep];
         continue;
       }
 
-      // Emit step started event
-      if (onEvent) {
-        onEvent({
-          type: "step_started",
-          step,
-          stepIndex: state.currentStep,
-          state,
-          timestamp: Date.now(),
-        });
-      }
+      this.emitStepStarted(onEvent, step, state);
 
       const stepResult = await this.runStep(step, userId, state, onEvent);
 
-      // Update state with step results
       if (stepResult.data) {
         state.stepData = { ...state.stepData, ...stepResult.data };
       }
 
-      // Check if step needs to wait (e.g., auth required)
-      if (stepResult.needsWait) {
-        const status: SessionState["status"] =
-          (stepResult.status as SessionState["status"]) || "waiting_auth";
-        state.status = status;
-        // Save state before returning (important for interruptions)
-        await saveState(state, status);
-        return {
-          content: `Waiting for ${step} to complete`,
-          metadata: {},
-          sessionState: state,
-          status,
-        };
+      const waitResult = await this.handleStepWait(
+        stepResult,
+        step,
+        state,
+        saveState
+      );
+      if (waitResult) {
+        return waitResult;
       }
 
-      // Mark step as completed
-      state.stepData[`${step}_completed`] = true;
-
-      // Emit step completed event
-      if (onEvent) {
-        onEvent({
-          type: "step_completed",
-          step,
-          stepIndex: state.currentStep,
-          state,
-          data: stepResult.data,
-          timestamp: Date.now(),
-        });
-      }
+      this.markStepCompleted(step, state);
+      this.emitStepCompleted(onEvent, step, state, stepResult.data);
 
       state.currentStep += 1;
       step = this.steps[state.currentStep];
     }
-    state.status = "active";
-    const chatResponse = await this.handleMessages(
-      messages,
-      userId,
-      state,
-      persistState,
-      onEvent
-    );
 
-    // Save final state
-    await saveState(state, state.status || "active");
+    return null;
+  }
 
-    return {
-      ...chatResponse,
-      sessionState: state,
-      status: state.status,
-    };
+  private emitStepStarted(
+    onEvent: AgentEventCallback | undefined,
+    step: string,
+    state: SessionState
+  ): void {
+    if (onEvent) {
+      onEvent({
+        type: "step_started",
+        step,
+        stepIndex: state.currentStep,
+        state,
+        timestamp: Date.now(),
+      });
+    }
+  }
+
+  private emitStepCompleted(
+    onEvent: AgentEventCallback | undefined,
+    step: string,
+    state: SessionState,
+    data?: Record<string, unknown>
+  ): void {
+    if (onEvent) {
+      onEvent({
+        type: "step_completed",
+        step,
+        stepIndex: state.currentStep,
+        state,
+        data,
+        timestamp: Date.now(),
+      });
+    }
+  }
+
+  private async handleStepWait(
+    stepResult: {
+      needsWait?: boolean;
+      status?: string;
+      data?: Record<string, unknown>;
+    },
+    step: string,
+    state: SessionState,
+    saveState: (
+      stateToSave: SessionState,
+      status?: SessionState["status"]
+    ) => Promise<void>
+  ): Promise<AgentResponseWithState | null> {
+    if (stepResult.needsWait) {
+      const status: SessionState["status"] =
+        (stepResult.status as SessionState["status"]) || "waiting_auth";
+      state.status = status;
+      await saveState(state, status);
+      return {
+        content: `Waiting for ${step} to complete`,
+        metadata: {},
+        sessionState: state,
+        status,
+      };
+    }
+    return null;
+  }
+
+  private markStepCompleted(step: string, state: SessionState): void {
+    state.stepData[`${step}_completed`] = true;
   }
 
   /**
@@ -213,7 +288,7 @@ export class InboxSummarizer extends Agent {
     }
   }
 
-  async assembleReport(_state: SessionState) {
+  assembleReport(_state: SessionState) {
     // This step simply injects the summaries of the latest emails into the LLM context
     const summaries = _state.stepData.summaries as Record<string, string>;
     const summariesXML = `<summaries>
@@ -259,18 +334,17 @@ ${Object.entries(summaries)
       userId,
       (authEvent: AuthEvent) => {
         // Convert auth event to agent event
-        this.emitAuthRequired(
-          onEvent,
-          {
+        this.emitAuthRequired(onEvent, {
+          data: {
             providerId: authEvent.providerId,
             status: authEvent.status,
             url: authEvent.url,
             scopes: authEvent.scopes,
           },
           state,
-          "initialize-tools",
-          state.currentStep
-        );
+          step: "initialize-tools",
+          stepIndex: state.currentStep,
+        });
       }
     );
 
@@ -299,13 +373,12 @@ ${Object.entries(summaries)
     status?: string;
   }> {
     // Emit tool call started event
-    this.emitToolCallStarted(
-      onEvent,
-      "Gmail.ListEmails",
+    this.emitToolCallStarted(onEvent, {
+      toolName: "Gmail.ListEmails",
       state,
-      "get-emails",
-      state.currentStep
-    );
+      step: "get-emails",
+      stepIndex: state.currentStep,
+    });
 
     // In this step we assume that auth was successful from
     // the initialize-tools step, so this tool execution should be successful
@@ -322,14 +395,13 @@ ${Object.entries(summaries)
       (emails.output?.value as { emails: Email[] })?.emails ?? [];
 
     // Emit tool call completed event
-    this.emitToolCallCompleted(
-      onEvent,
-      "Gmail.ListEmails",
-      { emailCount: emailList.length },
+    this.emitToolCallCompleted(onEvent, {
+      toolName: "Gmail.ListEmails",
+      result: { emailCount: emailList.length },
       state,
-      "get-emails",
-      state.currentStep
-    );
+      step: "get-emails",
+      stepIndex: state.currentStep,
+    });
 
     return {
       data: {
@@ -338,9 +410,9 @@ ${Object.entries(summaries)
     };
   }
 
-  async summarizeEmails(state: SessionState): Promise<{
+  summarizeEmails(state: SessionState): {
     data?: Record<string, unknown>;
-  }> {
+  } {
     const emails = (state.stepData.emails as Email[]) || [];
     const summaries: Record<string, string> = {};
 
@@ -360,16 +432,22 @@ ${Object.entries(summaries)
    * Process a conversation history and return the agent's response
    * Delegates to the base class's runAgent method
    */
-  async handleMessages(
+  handleMessages(
     messages: Message[],
     userId: string,
-    state: SessionState,
-    persistState?: (
-      state: SessionState,
-      status?: SessionState["status"]
-    ) => Promise<void>,
-    onEvent?: AgentEventCallback
+    options: {
+      state: SessionState;
+      persistState?: (
+        state: SessionState,
+        status?: SessionState["status"]
+      ) => Promise<void>;
+      onEvent?: AgentEventCallback;
+    }
   ): Promise<AgentResponseWithState> {
-    return super.runAgent(messages, userId, state, persistState, onEvent);
+    return super.runAgent(messages, userId, {
+      sessionState: options.state,
+      persistState: options.persistState,
+      onEvent: options.onEvent,
+    });
   }
 }

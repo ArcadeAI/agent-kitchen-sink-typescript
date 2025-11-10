@@ -10,6 +10,10 @@ import type {
 } from "./types.js";
 import { AuthPattern } from "./types.js";
 
+const DEFAULT_TEMPERATURE = 0.7;
+const DEFAULT_MAX_TOKENS = 1000;
+const DEFAULT_AGENTIC_LEVEL = 0.0;
+
 /**
  * Base agent class that handles conversation history and LLM interactions
  * Uses the @openai/agents framework internally
@@ -17,10 +21,10 @@ import { AuthPattern } from "./types.js";
 export class Agent {
   protected openaiAgent: OpenAIAgent;
   private config: Required<AgentConfig>;
-  public agentDescription: string;
-  public integrations: string[];
-  public authPattern: AuthPattern;
-  public agentic: number;
+  agentDescription: string;
+  integrations: string[];
+  authPattern: AuthPattern;
+  agentic: number;
 
   constructor(config: AgentConfig = {}) {
     if (!process.env.OPENAI_API_KEY) {
@@ -31,19 +35,19 @@ export class Agent {
       model: config.model ?? "gpt-4o",
       systemInstructions:
         config.systemInstructions ?? "You are a helpful assistant.",
-      temperature: config.temperature ?? 0.7,
-      maxTokens: config.maxTokens ?? 1000,
+      temperature: config.temperature ?? DEFAULT_TEMPERATURE,
+      maxTokens: config.maxTokens ?? DEFAULT_MAX_TOKENS,
       agentDescription: config.agentDescription ?? "",
       integrations: config.integrations ?? [],
       authPattern: config.authPattern ?? AuthPattern.JIT,
-      agentic: config.agentic ?? 0.0,
+      agentic: config.agentic ?? DEFAULT_AGENTIC_LEVEL,
     };
 
     // Initialize new fields
     this.agentDescription = config.agentDescription ?? "";
     this.integrations = config.integrations ?? [];
     this.authPattern = config.authPattern ?? AuthPattern.JIT;
-    this.agentic = config.agentic ?? 0.0;
+    this.agentic = config.agentic ?? DEFAULT_AGENTIC_LEVEL;
 
     // Create the OpenAI Agents SDK agent instance
     this.openaiAgent = new OpenAIAgent({
@@ -66,7 +70,9 @@ export class Agent {
       };
       try {
         onEvent(fullEvent);
-      } catch (_error) {}
+      } catch (_error) {
+        // Intentionally swallow errors from event callbacks to prevent agent failures
+      }
     }
   }
 
@@ -75,17 +81,19 @@ export class Agent {
    */
   protected emitAuthRequired(
     onEvent: AgentEventCallback | undefined,
-    data: Record<string, unknown>,
-    state?: SessionState,
-    step?: string,
-    stepIndex?: number
+    options: {
+      data: Record<string, unknown>;
+      state?: SessionState;
+      step?: string;
+      stepIndex?: number;
+    }
   ): void {
     this.emitEvent(onEvent, {
       type: "auth_required",
-      data,
-      state,
-      step,
-      stepIndex,
+      data: options.data,
+      state: options.state,
+      step: options.step,
+      stepIndex: options.stepIndex,
       requiresExternalAction: true,
       resumable: true,
     });
@@ -96,17 +104,19 @@ export class Agent {
    */
   protected emitWaitingInput(
     onEvent: AgentEventCallback | undefined,
-    data: Record<string, unknown>,
-    state?: SessionState,
-    step?: string,
-    stepIndex?: number
+    options: {
+      data: Record<string, unknown>;
+      state?: SessionState;
+      step?: string;
+      stepIndex?: number;
+    }
   ): void {
     this.emitEvent(onEvent, {
       type: "waiting_user_input",
-      data,
-      state,
-      step,
-      stepIndex,
+      data: options.data,
+      state: options.state,
+      step: options.step,
+      stepIndex: options.stepIndex,
       requiresExternalAction: true,
       resumable: true,
     });
@@ -117,17 +127,19 @@ export class Agent {
    */
   protected emitToolCallStarted(
     onEvent: AgentEventCallback | undefined,
-    toolName: string,
-    state?: SessionState,
-    step?: string,
-    stepIndex?: number
+    options: {
+      toolName: string;
+      state?: SessionState;
+      step?: string;
+      stepIndex?: number;
+    }
   ): void {
     this.emitEvent(onEvent, {
       type: "tool_call_started",
-      data: { toolName },
-      state,
-      step,
-      stepIndex,
+      data: { toolName: options.toolName },
+      state: options.state,
+      step: options.step,
+      stepIndex: options.stepIndex,
     });
   }
 
@@ -136,18 +148,20 @@ export class Agent {
    */
   protected emitToolCallCompleted(
     onEvent: AgentEventCallback | undefined,
-    toolName: string,
-    result: unknown,
-    state?: SessionState,
-    step?: string,
-    stepIndex?: number
+    options: {
+      toolName: string;
+      result: unknown;
+      state?: SessionState;
+      step?: string;
+      stepIndex?: number;
+    }
   ): void {
     this.emitEvent(onEvent, {
       type: "tool_call_completed",
-      data: { toolName, result },
-      state,
-      step,
-      stepIndex,
+      data: { toolName: options.toolName, result: options.result },
+      state: options.state,
+      step: options.step,
+      stepIndex: options.stepIndex,
     });
   }
 
@@ -155,105 +169,36 @@ export class Agent {
    * Process a conversation history and return the agent's response
    * @param messages - Conversation history
    * @param userId - User ID for context
-   * @param sessionState - Optional session state for resuming conversations
-   * @param persistState - Optional callback to persist state when it changes
-   * @param onEvent - Optional callback to receive events during execution
+   * @param options - Optional configuration for session state, persistence, and events
    */
   async runAgent(
     messages: Message[],
     _userId: string,
-    sessionState?: SessionState,
-    persistState?: (
-      state: SessionState,
-      status?: SessionState["status"]
-    ) => Promise<void>,
-    onEvent?: AgentEventCallback
+    options?: {
+      sessionState?: SessionState;
+      persistState?: (
+        state: SessionState,
+        status?: SessionState["status"]
+      ) => Promise<void>;
+      onEvent?: AgentEventCallback;
+    }
   ): Promise<AgentResponseWithState> {
+    const { sessionState, persistState, onEvent } = options ?? {};
+
     try {
-      // Filter out system messages from the history as they're handled by instructions
-      const nonSystemMessages = messages.filter((msg) => msg.role !== "system");
-
-      // Convert messages to a format suitable for the framework
-      // If there are messages, construct the input from the conversation
-      // Otherwise, use the last user message
-      let input: string;
-      if (nonSystemMessages.length === 0) {
-        throw new Error("No messages provided");
-      }
-
-      // Build conversation context from messages
-      // The framework's run() can handle string input, so we'll format the conversation
-      const conversationParts: string[] = [];
-      for (const msg of nonSystemMessages) {
-        if (msg.role === "user") {
-          conversationParts.push(`User: ${msg.content}`);
-        } else if (msg.role === "assistant") {
-          conversationParts.push(`Assistant: ${msg.content}`);
-        }
-      }
-
-      // Use the last user message as the primary input, with context if needed
-      const lastUserMessage = nonSystemMessages
-        .filter((m) => m.role === "user")
-        .pop();
-
-      if (!lastUserMessage) {
-        throw new Error("No user message found in conversation");
-      }
-
-      // If there's conversation history, include it in the input
-      if (conversationParts.length > 1) {
-        // Include previous conversation context
-        const context = conversationParts.slice(0, -1).join("\n");
-        input = `${context}\n\nUser: ${lastUserMessage.content}`;
-      } else {
-        input = lastUserMessage.content;
-      }
-
-      // Run the agent with the input
+      const input = this.prepareConversationInput(messages);
       const result = await run(this.openaiAgent, input);
+      const finalOutput = this.extractFinalOutput(result);
+      const metadata = this.buildMetadata(result);
+      const state = this.prepareSessionState(sessionState);
 
-      // Extract the final output
-      const finalOutput =
-        typeof result.finalOutput === "string"
-          ? result.finalOutput
-          : JSON.stringify(result.finalOutput);
-
-      // Extract metadata from the result if available
-      const metadata: AgentResponse["metadata"] = {
-        model: this.config.model,
-      };
-
-      // Try to extract usage information from the result if available
-      if (result && typeof result === "object" && "usage" in result) {
-        const usage = result.usage as { totalTokens?: number } | undefined;
-        if (usage?.totalTokens) {
-          metadata.tokensUsed = usage.totalTokens;
-        }
-      }
-
-      const state: SessionState = sessionState || {
-        currentStep: 0,
-        stepData: {},
-        status: "active",
-      };
-
-      // Emit state updated event
       this.emitEvent(onEvent, {
         type: "state_updated",
         state,
       });
 
-      // Persist state if callback provided
-      if (persistState) {
-        try {
-          await persistState(state, state.status || "active");
-        } catch (_error) {
-          // Don't throw - state persistence failure shouldn't break the agent response
-        }
-      }
+      await this.persistStateIfNeeded(persistState, state);
 
-      // Emit completion event
       this.emitEvent(onEvent, {
         type: "complete",
         state,
@@ -270,20 +215,111 @@ export class Agent {
         status: state.status || "active",
       };
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Unknown error";
-
-      // Emit error event
-      this.emitEvent(onEvent, {
-        type: "error",
-        error: errorMessage,
-      });
-
-      if (error instanceof Error) {
-        throw new Error(`Agent processing failed: ${error.message}`);
-      }
-      throw new Error("Agent processing failed with unknown error");
+      return this.handleAgentError(error, onEvent);
     }
+  }
+
+  private prepareConversationInput(messages: Message[]): string {
+    const nonSystemMessages = messages.filter((msg) => msg.role !== "system");
+
+    if (nonSystemMessages.length === 0) {
+      throw new Error("No messages provided");
+    }
+
+    const conversationParts = this.buildConversationParts(nonSystemMessages);
+    const lastUserMessage = nonSystemMessages
+      .filter((m) => m.role === "user")
+      .pop();
+
+    if (!lastUserMessage) {
+      throw new Error("No user message found in conversation");
+    }
+
+    if (conversationParts.length > 1) {
+      const context = conversationParts.slice(0, -1).join("\n");
+      return `${context}\n\nUser: ${lastUserMessage.content}`;
+    }
+
+    return lastUserMessage.content;
+  }
+
+  protected buildConversationParts(messages: Message[]): string[] {
+    const parts: string[] = [];
+    for (const msg of messages) {
+      if (msg.role === "user") {
+        parts.push(`User: ${msg.content}`);
+      } else if (msg.role === "assistant") {
+        parts.push(`Assistant: ${msg.content}`);
+      }
+    }
+    return parts;
+  }
+
+  private extractFinalOutput(result: { finalOutput: unknown }): string {
+    return typeof result.finalOutput === "string"
+      ? result.finalOutput
+      : JSON.stringify(result.finalOutput);
+  }
+
+  private buildMetadata(result: unknown): AgentResponse["metadata"] {
+    const metadata: AgentResponse["metadata"] = {
+      model: this.config.model,
+    };
+
+    if (result && typeof result === "object" && "usage" in result) {
+      const usage = result.usage as { totalTokens?: number } | undefined;
+      if (usage?.totalTokens) {
+        metadata.tokensUsed = usage.totalTokens;
+      }
+    }
+
+    return metadata;
+  }
+
+  private prepareSessionState(sessionState?: SessionState): SessionState {
+    return (
+      sessionState || {
+        currentStep: 0,
+        stepData: {},
+        status: "active",
+      }
+    );
+  }
+
+  private async persistStateIfNeeded(
+    persistState:
+      | ((
+          stateToSave: SessionState,
+          status?: SessionState["status"]
+        ) => Promise<void>)
+      | undefined,
+    state: SessionState
+  ): Promise<void> {
+    if (persistState) {
+      try {
+        await persistState(state, state.status || "active");
+      } catch (_error) {
+        // Don't throw - state persistence failure shouldn't break the agent response
+      }
+    }
+  }
+
+  private handleAgentError(
+    error: unknown,
+    onEvent?: AgentEventCallback
+  ): never {
+    const errorMessage =
+      error instanceof Error ? error.message : "Unknown error";
+
+    this.emitEvent(onEvent, {
+      type: "error",
+      error: errorMessage,
+    });
+
+    if (error instanceof Error) {
+      throw new Error(`Agent processing failed: ${error.message}`);
+    }
+    throw new Error("Agent processing failed with unknown error");
   }
 
   /**

@@ -10,6 +10,8 @@ import type {
   SessionState,
 } from "./types.js";
 
+const DEFAULT_TOOL_LIMIT = 30;
+
 /**
  * Configuration for ReactAgent
  */
@@ -35,160 +37,201 @@ export class ReactAgent extends Agent {
     super(config);
     this.toolkits = config.toolkits ?? [];
     this.tools = config.tools ?? [];
-    this.toolLimit = config.toolLimit ?? 30;
+    this.toolLimit = config.toolLimit ?? DEFAULT_TOOL_LIMIT;
   }
 
   /**
    * Process a conversation with tool-calling support
    * @param messages - Conversation history
    * @param userId - User ID for context and tool authorization
-   * @param sessionState - Optional session state for resuming conversations
-   * @param persistState - Optional callback to persist state when it changes
-   * @param onEvent - Optional callback to receive events during execution
+   * @param options - Optional configuration for session state, persistence, and events
    */
   async runAgent(
     messages: Message[],
     userId: string,
-    sessionState?: SessionState,
-    persistState?: (
-      state: SessionState,
-      status?: SessionState["status"]
-    ) => Promise<void>,
-    onEvent?: AgentEventCallback
+    options?: {
+      sessionState?: SessionState;
+      persistState?: (
+        state: SessionState,
+        status?: SessionState["status"]
+      ) => Promise<void>;
+      onEvent?: AgentEventCallback;
+    }
   ): Promise<AgentResponseWithState> {
+    const { sessionState, persistState, onEvent } = options ?? {};
     try {
-      // Load tools from Arcade if any toolkits or tools are configured
-      let openaiTools: any[] = [];
-      if (this.toolkits.length > 0 || this.tools.length > 0) {
-        try {
-          openaiTools = await getToolsOpenAI({
-            toolkits: this.toolkits,
-            tools: this.tools,
-            limit: this.toolLimit,
-            userId,
-          });
-        } catch (_error) {
-          // Continue without tools rather than failing
-        }
-      }
-
-      // Filter out system messages from the history as they're handled by instructions
-      const nonSystemMessages = messages.filter((msg) => msg.role !== "system");
-
-      // Validate we have messages
-      if (nonSystemMessages.length === 0) {
-        throw new Error("No messages provided");
-      }
-
-      // Build conversation context from messages
-      const conversationParts: string[] = [];
-      for (const msg of nonSystemMessages) {
-        if (msg.role === "user") {
-          conversationParts.push(`User: ${msg.content}`);
-        } else if (msg.role === "assistant") {
-          conversationParts.push(`Assistant: ${msg.content}`);
-        }
-      }
-
-      // Use the last user message as the primary input
-      const lastUserMessage = nonSystemMessages
-        .filter((m) => m.role === "user")
-        .pop();
-
-      if (!lastUserMessage) {
-        throw new Error("No user message found in conversation");
-      }
-
-      // If there's conversation history, include it in the input
-      let input: string;
-      if (conversationParts.length > 1) {
-        const context = conversationParts.slice(0, -1).join("\n");
-        input = `${context}\n\nUser: ${lastUserMessage.content}`;
-      } else {
-        input = lastUserMessage.content;
-      }
-
-      // Create a new agent instance with tools
-      const agentWithTools = new OpenAIAgent({
-        name: this.getConfig().agentDescription,
-        instructions: this.getConfig().systemInstructions,
-        tools: openaiTools.length > 0 ? openaiTools : undefined,
-      });
-
-      // Run the agent with the input
+      const openaiTools = await this.loadTools(userId);
+      const input = this.prepareInput(messages);
+      const agentWithTools = this.createAgentWithTools(openaiTools);
       const result = await run(agentWithTools, input);
 
-      // Extract the final output
-      const finalOutput =
-        typeof result.finalOutput === "string"
-          ? result.finalOutput
-          : JSON.stringify(result.finalOutput);
+      return await this.buildResponse(
+        result,
+        sessionState,
+        persistState,
+        onEvent
+      );
+    } catch (error) {
+      return this.handleReactAgentError(error, onEvent);
+    }
+  }
 
-      // Extract metadata from the result if available
-      const metadata: AgentResponse["metadata"] = {
-        model: this.getConfig().model,
-      };
+  // biome-ignore lint/suspicious/noExplicitAny: Tools from OpenAI library require any type
+  private async loadTools(userId: string): Promise<any[]> {
+    if (this.toolkits.length === 0 && this.tools.length === 0) {
+      return [];
+    }
 
-      // Try to extract usage information from the result if available
-      if (result && typeof result === "object" && "usage" in result) {
-        const usage = result.usage as { totalTokens?: number } | undefined;
-        if (usage?.totalTokens) {
-          metadata.tokensUsed = usage.totalTokens;
-        }
+    try {
+      return await getToolsOpenAI({
+        toolkits: this.toolkits,
+        tools: this.tools,
+        limit: this.toolLimit,
+        userId,
+      });
+    } catch (_error) {
+      // Continue without tools rather than failing
+      return [];
+    }
+  }
+
+  private prepareInput(messages: Message[]): string {
+    const nonSystemMessages = messages.filter((msg) => msg.role !== "system");
+
+    if (nonSystemMessages.length === 0) {
+      throw new Error("No messages provided");
+    }
+
+    const conversationParts = this.buildConversationParts(nonSystemMessages);
+    const lastUserMessage = nonSystemMessages
+      .filter((m) => m.role === "user")
+      .pop();
+
+    if (!lastUserMessage) {
+      throw new Error("No user message found in conversation");
+    }
+
+    if (conversationParts.length > 1) {
+      const context = conversationParts.slice(0, -1).join("\n");
+      return `${context}\n\nUser: ${lastUserMessage.content}`;
+    }
+
+    return lastUserMessage.content;
+  }
+
+  // biome-ignore lint/suspicious/noExplicitAny: Tools from OpenAI library require any type
+  private createAgentWithTools(tools: any[]): OpenAIAgent {
+    return new OpenAIAgent({
+      name: this.getConfig().agentDescription,
+      instructions: this.getConfig().systemInstructions,
+      tools: tools.length > 0 ? tools : undefined,
+    });
+  }
+
+  private async buildResponse(
+    result: { finalOutput: unknown; usage?: unknown },
+    sessionState: SessionState | undefined,
+    persistState:
+      | ((
+          stateToSave: SessionState,
+          status?: SessionState["status"]
+        ) => Promise<void>)
+      | undefined,
+    onEvent: AgentEventCallback | undefined
+  ): Promise<AgentResponseWithState> {
+    const finalOutput =
+      typeof result.finalOutput === "string"
+        ? result.finalOutput
+        : JSON.stringify(result.finalOutput);
+
+    const metadata = this.extractMetadata(result);
+    const state = this.getOrCreateState(sessionState);
+
+    this.emitEvent(onEvent, {
+      type: "state_updated",
+      state,
+    });
+
+    await this.persistIfNeeded(persistState, state);
+
+    this.emitEvent(onEvent, {
+      type: "complete",
+      state,
+      data: {
+        content: finalOutput,
+        metadata,
+      },
+    });
+
+    return {
+      content: finalOutput,
+      metadata,
+      sessionState: state,
+      status: state.status || "active",
+    };
+  }
+
+  private extractMetadata(result: {
+    usage?: unknown;
+  }): AgentResponse["metadata"] {
+    const metadata: AgentResponse["metadata"] = {
+      model: this.getConfig().model,
+    };
+
+    if (result && typeof result === "object" && "usage" in result) {
+      const usage = result.usage as { totalTokens?: number } | undefined;
+      if (usage?.totalTokens) {
+        metadata.tokensUsed = usage.totalTokens;
       }
+    }
 
-      const state: SessionState = sessionState || {
+    return metadata;
+  }
+
+  private getOrCreateState(sessionState?: SessionState): SessionState {
+    return (
+      sessionState || {
         currentStep: 0,
         stepData: {},
         status: "active",
-      };
-
-      // Emit state updated event
-      this.emitEvent(onEvent, {
-        type: "state_updated",
-        state,
-      });
-
-      // Persist state if callback provided
-      if (persistState) {
-        try {
-          await persistState(state, state.status || "active");
-        } catch (_error) {
-          // Don't throw - state persistence failure shouldn't break the agent response
-        }
       }
+    );
+  }
 
-      // Emit completion event
-      this.emitEvent(onEvent, {
-        type: "complete",
-        state,
-        data: {
-          content: finalOutput,
-          metadata,
-        },
-      });
-
-      return {
-        content: finalOutput,
-        metadata,
-        sessionState: state,
-        status: state.status || "active",
-      };
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Unknown error";
-
-      // Emit error event
-      this.emitEvent(onEvent, {
-        type: "error",
-        error: errorMessage,
-      });
-
-      if (error instanceof Error) {
-        throw new Error(`React agent processing failed: ${error.message}`);
+  private async persistIfNeeded(
+    persistState:
+      | ((
+          stateToSave: SessionState,
+          status?: SessionState["status"]
+        ) => Promise<void>)
+      | undefined,
+    state: SessionState
+  ): Promise<void> {
+    if (persistState) {
+      try {
+        await persistState(state, state.status || "active");
+      } catch (_error) {
+        // Don't throw - state persistence failure shouldn't break the agent response
       }
-      throw new Error("React agent processing failed with unknown error");
     }
+  }
+
+  private handleReactAgentError(
+    error: unknown,
+    onEvent?: AgentEventCallback
+  ): never {
+    const errorMessage =
+      error instanceof Error ? error.message : "Unknown error";
+
+    this.emitEvent(onEvent, {
+      type: "error",
+      error: errorMessage,
+    });
+
+    if (error instanceof Error) {
+      throw new Error(`React agent processing failed: ${error.message}`);
+    }
+    throw new Error("React agent processing failed with unknown error");
   }
 
   /**
@@ -204,8 +247,8 @@ export class ReactAgent extends Agent {
     if (config.tools !== undefined) {
       this.tools = config.tools;
     }
-    if ((config as ReactAgentConfig).toolLimit !== undefined) {
-      this.toolLimit = (config as ReactAgentConfig).toolLimit!;
+    if (config.toolLimit !== undefined) {
+      this.toolLimit = config.toolLimit;
     }
   }
 
