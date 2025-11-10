@@ -1,12 +1,12 @@
-import type { ToolDefinition } from "@arcadeai/arcadejs/resources/tools/tools";
 import {
-  toZod,
   executeOrAuthorizeZodTool,
+  toZod,
   type ZodTool,
 } from "@arcadeai/arcadejs/lib";
-import arcadeClient from "./index";
+import type { ToolDefinition } from "@arcadeai/arcadejs/resources/tools/tools";
 import type { AuthorizationResponse } from "@arcadeai/arcadejs/resources.mjs";
 import { tool } from "@openai/agents";
+import arcadeClient from "./index";
 
 export type AuthEvent = {
   providerId: string;
@@ -49,16 +49,14 @@ export async function getTools({
     toolkits.map(async (tkitName) => {
       const definitions = await arcadeClient.tools.list({
         toolkit: tkitName,
-        limit: limit,
+        limit,
       });
       return definitions.items;
     })
   );
 
   const from_tools = await Promise.all(
-    tools.map(async (toolName) => {
-      return await arcadeClient.tools.get(toolName);
-    })
+    tools.map(async (toolName) => await arcadeClient.tools.get(toolName))
   );
 
   const all_tools = [...from_toolkits.flat(), ...from_tools];
@@ -96,7 +94,7 @@ export async function getToolsOpenAI({
   tools = [],
   limit = 30,
   userId,
-}: GetToolsProps) {
+}: GetToolsProps): Promise<ReturnType<typeof tool>[]> {
   if (!userId) {
     throw new Error("userId is required");
   }
@@ -107,27 +105,30 @@ export async function getToolsOpenAI({
     // and we can approve or reject the tool call from the chatbot loop.
     return tool({
       ...zodTool,
-      needsApproval: async (_ctx: any, _input: any) => {
-        return TOOLS_WITH_APPROVAL.includes(zodTool.name);
-      },
+      needsApproval: async (_ctx: any, _input: any) =>
+        TOOLS_WITH_APPROVAL.includes(zodTool.name),
     });
   };
 
   const zodTools = toZod({
     tools: arcadeTools,
     client: arcadeClient,
-    userId: userId,
+    userId,
     executeFactory: executeOrAuthorizeZodTool,
   });
 
-  return zodTools.map(enforceApproval ? toolWithApproval : tool);
+  // Always use toolWithApproval - it checks TOOLS_WITH_APPROVAL internally
+  return zodTools.map(toolWithApproval);
 }
 
 /**
  * @deprecated Use the event-based authorizeTools function instead
  */
 export class AuthorizationPendingError extends Error {
-  constructor(message: string, public authResponses: AuthorizationResponse[]) {
+  constructor(
+    message: string,
+    public authResponses: AuthorizationResponse[]
+  ) {
     super(message);
     this.name = "AuthorizationPendingError";
   }
@@ -155,7 +156,6 @@ export async function authorizeTools(
   }
   const authResponses: AuthorizationResponse[] = [];
   let allCompleted = true;
-  console.log("providerToScopes", providerToScopes);
 
   for (const [providerId, scopesSet] of providerToScopes) {
     const authResponse = await arcadeClient.auth.start(userId, providerId, {

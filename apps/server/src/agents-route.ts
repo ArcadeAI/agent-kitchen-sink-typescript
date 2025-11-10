@@ -1,15 +1,15 @@
-import { Agent, type AgentConfig } from "@gmail-agents/agents";
 import type {
-  SessionState,
   AgentResponseWithState,
   Message,
+  SessionState,
 } from "@gmail-agents/agents";
+import { Agent, type AgentConfig } from "@gmail-agents/agents";
+import { InboxSummarizer } from "@gmail-agents/agents/inbox-agents/inbox-summarizer";
 // Import event types using wildcard export
 import type {
   AgentEvent,
   AgentEventCallback,
 } from "@gmail-agents/agents/types";
-import { InboxSummarizer } from "@gmail-agents/agents/inbox-agents/inbox-summarizer";
 import { auth } from "@gmail-agents/auth";
 import prisma from "@gmail-agents/db";
 import { Elysia, t } from "elysia";
@@ -65,10 +65,7 @@ function createAgent(agentId: string): AgentWithPersistence {
 }
 
 export const agentsRoute = new Elysia()
-  .get("/api/agents/test", () => {
-    console.log("Test route handler called!");
-    return { message: "Agent route test works" };
-  })
+  .get("/api/agents/test", () => ({ message: "Agent route test works" }))
   // Create a new agent session
   .post(
     "/api/agents/sessions",
@@ -125,7 +122,6 @@ export const agentsRoute = new Elysia()
           status: agentSession.status,
         };
       } catch (error) {
-        console.error("Error creating session", error);
         set.status = HttpStatus.INTERNAL_SERVER_ERROR;
         return {
           error:
@@ -209,7 +205,6 @@ export const agentsRoute = new Elysia()
           updatedAt: agentSession.updatedAt,
         };
       } catch (error) {
-        console.error("Error fetching session", error);
         set.status = HttpStatus.INTERNAL_SERVER_ERROR;
         return {
           error:
@@ -280,7 +275,6 @@ export const agentsRoute = new Elysia()
           ),
         };
       } catch (error) {
-        console.error("Error listing sessions", error);
         set.status = HttpStatus.INTERNAL_SERVER_ERROR;
         return {
           error:
@@ -351,7 +345,7 @@ export const agentsRoute = new Elysia()
           // If there are items to replay, return them as a stream
           if (items.length > 0) {
             const stream = new ReadableStream({
-              async start(controller) {
+              start(controller) {
                 const encoder = new TextEncoder();
                 for (const item of items) {
                   const eventData: AgentEvent = {
@@ -363,7 +357,7 @@ export const agentsRoute = new Elysia()
                     error: item.error || undefined,
                     timestamp: Number(item.timestamp),
                   };
-                  const json = JSON.stringify(eventData) + "\n";
+                  const json = `${JSON.stringify(eventData)}\n`;
                   controller.enqueue(encoder.encode(json));
                 }
                 controller.close();
@@ -372,7 +366,7 @@ export const agentsRoute = new Elysia()
 
             set.headers["Content-Type"] = "application/x-ndjson";
             set.headers["Cache-Control"] = "no-cache";
-            set.headers["Connection"] = "keep-alive";
+            set.headers.Connection = "keep-alive";
             set.headers["X-Accel-Buffering"] = "no";
 
             return new Response(stream, {
@@ -415,8 +409,6 @@ export const agentsRoute = new Elysia()
           status: agentSession.status as SessionState["status"],
         };
 
-        console.log("sessionState", sessionState);
-
         // Convert database items (only message types) to agent format
         const messages = agentSession.items
           .filter((item) =>
@@ -452,27 +444,21 @@ export const agentsRoute = new Elysia()
           const stateDataToSave = JSON.parse(JSON.stringify(stepData));
           const currentStep = stateToSave.currentStep ?? 0;
           const status = statusToSave || stateToSave.status || "active";
-
-          try {
-            await prisma.agentSession.update({
-              where: { id: agentSession.id },
-              data: {
-                currentStep,
-                status,
-                stateData: stateDataToSave,
-                updatedAt: new Date(),
-              },
-            });
-          } catch (updateError) {
-            console.error("Error persisting session state:", updateError);
-            throw updateError;
-          }
+          await prisma.agentSession.update({
+            where: { id: agentSession.id },
+            data: {
+              currentStep,
+              status,
+              stateData: stateDataToSave,
+              updatedAt: new Date(),
+            },
+          });
         };
 
         // Set up streaming response
         set.headers["Content-Type"] = "application/x-ndjson";
         set.headers["Cache-Control"] = "no-cache";
-        set.headers["Connection"] = "keep-alive";
+        set.headers.Connection = "keep-alive";
         set.headers["X-Accel-Buffering"] = "no"; // Disable buffering for nginx
 
         // Create a readable stream
@@ -502,18 +488,15 @@ export const agentsRoute = new Elysia()
                 });
 
                 // Stream event to client
-                const json = JSON.stringify(event) + "\n";
+                const json = `${JSON.stringify(event)}\n`;
                 controller.enqueue(encoder.encode(json));
-                console.log("Streaming event:", event.type, event.step || "");
 
                 // Check if this event requires external action and should close stream
                 if (event.requiresExternalAction) {
-                  console.log(
-                    "Event requires external action, closing stream after this event"
-                  );
+                  // Stream will be closed by shouldCloseStream flag
                 }
-              } catch (error) {
-                console.error("Error sending event:", error);
+              } catch (_error) {
+                // Silently handle event persistence errors
               }
             };
 
@@ -568,12 +551,12 @@ export const agentsRoute = new Elysia()
                 // Send assistant message event to frontend for real-time display
                 controller.enqueue(
                   encoder.encode(
-                    JSON.stringify({
+                    `${JSON.stringify({
                       type: "assistant_message",
                       timestamp: messageTimestamp,
                       role: "assistant",
                       content: response.content,
-                    }) + "\n"
+                    })}\n`
                   )
                 );
 
@@ -614,7 +597,6 @@ export const agentsRoute = new Elysia()
           },
         });
       } catch (error: unknown) {
-        console.error("Error setting up stream", error);
         set.status = HttpStatus.INTERNAL_SERVER_ERROR;
         return {
           error:
@@ -704,27 +686,21 @@ export const agentsRoute = new Elysia()
           const stateDataToSave = JSON.parse(JSON.stringify(stepData));
           const currentStep = stateToSave.currentStep ?? 0;
           const status = statusToSave || stateToSave.status || "active";
-
-          try {
-            await prisma.agentSession.update({
-              where: { id: agentSession.id },
-              data: {
-                currentStep,
-                status,
-                stateData: stateDataToSave,
-                updatedAt: new Date(),
-              },
-            });
-          } catch (updateError) {
-            console.error("Error persisting session state:", updateError);
-            throw updateError;
-          }
+          await prisma.agentSession.update({
+            where: { id: agentSession.id },
+            data: {
+              currentStep,
+              status,
+              stateData: stateDataToSave,
+              updatedAt: new Date(),
+            },
+          });
         };
 
         // Set up streaming response
         set.headers["Content-Type"] = "application/x-ndjson";
         set.headers["Cache-Control"] = "no-cache";
-        set.headers["Connection"] = "keep-alive";
+        set.headers.Connection = "keep-alive";
         set.headers["X-Accel-Buffering"] = "no";
 
         // Create a readable stream
@@ -754,11 +730,10 @@ export const agentsRoute = new Elysia()
                 });
 
                 // Stream event to client
-                const json = JSON.stringify(event) + "\n";
+                const json = `${JSON.stringify(event)}\n`;
                 controller.enqueue(encoder.encode(json));
-                console.log("Streaming event:", event.type, event.step || "");
-              } catch (error) {
-                console.error("Error sending event:", error);
+              } catch (_error) {
+                // Silently handle event persistence errors
               }
             };
 
@@ -849,7 +824,6 @@ export const agentsRoute = new Elysia()
           },
         });
       } catch (error: unknown) {
-        console.error("Error resuming session", error);
         set.status = HttpStatus.INTERNAL_SERVER_ERROR;
         return {
           error:

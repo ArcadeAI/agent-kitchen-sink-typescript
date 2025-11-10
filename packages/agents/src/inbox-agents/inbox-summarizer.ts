@@ -1,15 +1,15 @@
+import type { AuthEvent } from "@gmail-agents/arcade";
+import arcadeClient, { authorizeTools, getTools } from "@gmail-agents/arcade";
+import { Agent } from "../openai-agent.js";
 import type {
   AgentConfig,
+  AgentEventCallback,
   AgentResponseWithState,
   Message,
   SessionState,
-  AgentEventCallback,
 } from "../types.js";
-import { Agent } from "../openai-agent.js";
 import { AuthPattern } from "../types.js";
 import type { Email } from "./types.js";
-import arcadeClient, { getTools, authorizeTools } from "@gmail-agents/arcade";
-import type { AuthEvent } from "@gmail-agents/arcade";
 
 /**
  * Inbox summarizer agent that extends the base Agent class
@@ -75,26 +75,18 @@ export class InboxSummarizer extends Agent {
             stateToSave,
             status || stateToSave.status || "active"
           );
-        } catch (error) {
-          console.error("Failed to persist state:", error);
+        } catch (_error) {
           // Don't throw - state persistence failure shouldn't break the agent
         }
       }
     };
 
-    console.log("state", state);
-    console.log("messages", messages);
-    console.log("userId", userId);
-
     // Run workflow steps until we reach free-chat
     let step = this.steps[state.currentStep];
     while (step && step !== "free-chat") {
-      console.log(`Running step: ${step} (step ${state.currentStep})`);
-
       // Check if step is already completed (idempotency check)
       if (this.isStepCompleted(step, state)) {
-        console.log(`Step ${step} already completed, skipping`);
-        state.currentStep++;
+        state.currentStep += 1;
         step = this.steps[state.currentStep];
         continue;
       }
@@ -147,12 +139,9 @@ export class InboxSummarizer extends Agent {
         });
       }
 
-      state.currentStep++;
+      state.currentStep += 1;
       step = this.steps[state.currentStep];
     }
-
-    // Run the agentic portion (free chat)
-    console.log("Free chat");
     state.status = "active";
     const chatResponse = await this.handleMessages(
       messages,
@@ -241,13 +230,13 @@ ${Object.entries(summaries)
 	`;
 
     this.updateConfig({
-      systemInstructions: systemInstructions,
+      systemInstructions,
     });
     // Use state.stepData.summaries to assemble the report
     return {
       data: {
         reportAssembled: true,
-        systemInstructions: systemInstructions,
+        systemInstructions,
       },
     };
   }
@@ -285,8 +274,6 @@ ${Object.entries(summaries)
       }
     );
 
-    console.log("authResult", authResult);
-
     if (!authResult.completed) {
       return {
         needsWait: true,
@@ -311,9 +298,6 @@ ${Object.entries(summaries)
     needsWait?: boolean;
     status?: string;
   }> {
-    console.log("calling the Arcade client to get emails");
-    console.log("userId", userId);
-
     // Emit tool call started event
     this.emitToolCallStarted(
       onEvent,
@@ -332,7 +316,6 @@ ${Object.entries(summaries)
       },
       user_id: userId,
     });
-    console.log("emails", emails);
 
     // TODO: Add pagination support for long lists
     const emailList =
@@ -358,9 +341,6 @@ ${Object.entries(summaries)
   async summarizeEmails(state: SessionState): Promise<{
     data?: Record<string, unknown>;
   }> {
-    // TODO: Implement email summarization
-    // Use state.stepData.emails to summarize
-    console.log("summarizing emails", state.stepData.emails);
     const emails = (state.stepData.emails as Email[]) || [];
     const summaries: Record<string, string> = {};
 
@@ -390,8 +370,6 @@ ${Object.entries(summaries)
     ) => Promise<void>,
     onEvent?: AgentEventCallback
   ): Promise<AgentResponseWithState> {
-    // Use the base class's runAgent method
-    console.log("openaiAgent instructions", this.openaiAgent.instructions);
     return super.runAgent(messages, userId, state, persistState, onEvent);
   }
 }

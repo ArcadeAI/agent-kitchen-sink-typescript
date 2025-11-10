@@ -1,6 +1,6 @@
-import dotenv from "dotenv";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import dotenv from "dotenv";
 
 // Load environment variables from the server's .env file
 // Resolve path relative to this file's location
@@ -22,20 +22,21 @@ try {
   }
 }
 
+// biome-ignore lint/performance/noBarrelFile: This is an intentional index/barrel file for the agents package
 export { Agent } from "./openai-agent.js";
-export { ReactAgent } from "./openai-react-agent.js";
 export type { ReactAgentConfig } from "./openai-react-agent.js";
+export { ReactAgent } from "./openai-react-agent.js";
 export type {
   AgentConfig,
+  AgentError,
+  AgentEvent,
+  AgentEventCallback,
+  AgentEventType,
   AgentResponse,
   AgentResponseWithState,
-  AgentError,
   Message,
   MessageRole,
   SessionState,
   SessionStatus,
   StatePersistenceCallback,
-  AgentEvent,
-  AgentEventType,
-  AgentEventCallback,
 } from "./types.js";

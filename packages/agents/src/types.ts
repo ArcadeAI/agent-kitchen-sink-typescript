@@ -6,23 +6,25 @@ export type MessageRole = "user" | "assistant" | "system";
 /**
  * Authentication pattern for agents
  */
-export enum AuthPattern {
-  JIT = "JIT",
-  PRE_AUTH = "pre-auth",
-}
+export const AuthPattern = {
+  JIT: "JIT",
+  PRE_AUTH: "pre-auth",
+} as const;
+
+export type AuthPattern = (typeof AuthPattern)[keyof typeof AuthPattern];
 
 /**
  * A single message in the conversation history
  */
-export interface Message {
+export type Message = {
   role: MessageRole;
   content: string;
-}
+};
 
 /**
  * Configuration for an agent
  */
-export interface AgentConfig {
+export type AgentConfig = {
   /**
    * The OpenAI model to use (e.g., "gpt-4o", "gpt-4-turbo")
    */
@@ -55,12 +57,12 @@ export interface AgentConfig {
    * Agentic score (0-1) indicating how autonomous the agent is
    */
   agentic?: number;
-}
+};
 
 /**
  * Response from an agent
  */
-export interface AgentResponse {
+export type AgentResponse = {
   /**
    * The text content of the agent's response
    */
@@ -73,15 +75,15 @@ export interface AgentResponse {
     tokensUsed?: number;
     finishReason?: string;
   };
-}
+};
 
 /**
  * Error response from an agent
  */
-export interface AgentError {
+export type AgentError = {
   error: string;
   code?: string;
-}
+};
 
 /**
  * Session status types
@@ -121,7 +123,7 @@ export type AgentEventType =
 /**
  * Event emitted during agent execution
  */
-export interface AgentEvent {
+export type AgentEvent = {
   /**
    * Type of event
    */
@@ -159,7 +161,7 @@ export interface AgentEvent {
    * Flag for whether agent can be resumed after this event
    */
   resumable?: boolean;
-}
+};
 
 /**
  * Callback function for receiving agent events
@@ -170,7 +172,7 @@ export type AgentEventCallback = (event: AgentEvent) => void | Promise<void>;
 /**
  * Session state that can be persisted and restored
  */
-export interface SessionState {
+export type SessionState = {
   /**
    * Current step index in the workflow
    */
@@ -183,7 +185,7 @@ export interface SessionState {
    * Status of the session
    */
   status?: SessionStatus;
-}
+};
 
 /**
  * Extended agent response that includes session state

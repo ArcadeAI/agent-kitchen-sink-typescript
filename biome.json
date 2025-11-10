@@ -10,6 +10,7 @@
       "!**/dev-dist",
       "!**/.zed",
       "!**/.vscode",
+      "!**/.cursor",
       "!**/routeTree.gen.ts",
       "!**/src-tauri",
       "!**/.nuxt",
@@ -22,5 +23,38 @@
       "!**/.source"
     ]
   },
-  "extends": ["ultracite/core", "ultracite/react"]
+  "extends": ["ultracite/core", "ultracite/react"],
+  "linter": {
+    "rules": {
+      "suspicious": {
+        "noEmptyBlockStatements": "warn",
+        "useAwait": "warn",
+        "noExplicitAny": "warn"
+      },
+      "complexity": {
+        "noExcessiveCognitiveComplexity": "warn"
+      },
+      "style": {
+        "noMagicNumbers": "warn",
+        "useDefaultSwitchClause": "warn",
+        "useConsistentMemberAccessibility": "warn",
+        "noNonNullAssertion": "warn",
+        "noParameterProperties": "warn",
+        "noNestedTernary": "warn",
+        "noParameterAssign": "warn"
+      },
+      "nursery": {
+        "noShadow": "warn",
+        "useMaxParams": "warn"
+      },
+      "correctness": {
+        "noUndeclaredVariables": "error",
+        "noUnusedFunctionParameters": "warn",
+        "useExhaustiveDependencies": "warn"
+      },
+      "a11y": {
+        "useButtonType": "warn"
+      }
+    }
+  }
 }

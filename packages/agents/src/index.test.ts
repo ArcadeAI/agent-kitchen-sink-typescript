@@ -15,7 +15,7 @@ describe("Agent", () => {
 
   it("should throw error if OPENAI_API_KEY is not set", () => {
     const originalKey = process.env.OPENAI_API_KEY;
-    delete process.env.OPENAI_API_KEY;
+    process.env.OPENAI_API_KEY = undefined;
 
     expect(() => {
       new Agent();
@@ -26,50 +26,52 @@ describe("Agent", () => {
     }
   });
 
-	it.skip("should process messages and return response", async () => {
-		// Skipped: requires OpenAI API key and network access
-		const agent = new Agent({
-			model: "gpt-4o",
-			systemInstructions: "You are a helpful assistant.",
-		});
+  // biome-ignore lint/suspicious/noSkippedTests: API integration test requires OpenAI key and network
+  it.skip("should process messages and return response", async () => {
+    // Skipped: requires OpenAI API key and network access
+    const agent = new Agent({
+      model: "gpt-4o",
+      systemInstructions: "You are a helpful assistant.",
+    });
 
-		const messages: Message[] = [
-			{
-				role: "user",
-				content: "Hello, how are you?",
-			},
-		];
+    const messages: Message[] = [
+      {
+        role: "user",
+        content: "Hello, how are you?",
+      },
+    ];
 
-		const response = await agent.runAgent(messages, "test-user-id");
+    const response = await agent.runAgent(messages, "test-user-id");
 
-		expect(response).toHaveProperty("content");
-		expect(typeof response.content).toBe("string");
-		expect(response.content.length).toBeGreaterThan(0);
-	});
+    expect(response).toHaveProperty("content");
+    expect(typeof response.content).toBe("string");
+    expect(response.content.length).toBeGreaterThan(0);
+  });
 
-	it.skip("should handle conversation history", async () => {
-		// Skipped: requires OpenAI API key and network access
-		const agent = new Agent({
-			model: "gpt-4o",
-		});
+  // biome-ignore lint/suspicious/noSkippedTests: API integration test requires OpenAI key and network
+  it.skip("should handle conversation history", async () => {
+    // Skipped: requires OpenAI API key and network access
+    const agent = new Agent({
+      model: "gpt-4o",
+    });
 
-		const messages: Message[] = [
-			{
-				role: "user",
-				content: "My name is Alice.",
-			},
-			{
-				role: "assistant",
-				content: "Nice to meet you, Alice!",
-			},
-			{
-				role: "user",
-				content: "What's my name?",
-			},
-		];
+    const messages: Message[] = [
+      {
+        role: "user",
+        content: "My name is Alice.",
+      },
+      {
+        role: "assistant",
+        content: "Nice to meet you, Alice!",
+      },
+      {
+        role: "user",
+        content: "What's my name?",
+      },
+    ];
 
-		const response = await agent.runAgent(messages, "test-user-id");
+    const response = await agent.runAgent(messages, "test-user-id");
 
-		expect(response.content.toLowerCase()).toContain("alice");
-	});
+    expect(response.content.toLowerCase()).toContain("alice");
+  });
 });

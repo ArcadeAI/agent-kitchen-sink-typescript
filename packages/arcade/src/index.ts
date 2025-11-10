@@ -5,3 +5,24 @@ import { Arcade } from "@arcadeai/arcadejs";
 const arcadeClient = new Arcade();
 
 export default arcadeClient;
+
+// Export MCP client classes and utilities
+// biome-ignore lint/performance/noBarrelFile: This is an intentional index/barrel file for the arcade package
+export { createMCPClient, MCPClient } from "./mcp-client.js";
+export type {
+  MCPClientConfig,
+  StdioTransportConfig,
+  StreamableHTTPTransportConfig,
+  TransportConfig,
+} from "./mcp-client-types.js";
+export {
+  createStdioTransport,
+  createStreamableHTTPTransport,
+} from "./mcp-client-types.js";
+export type { AuthEvent } from "./tools-utils.js";
+export {
+  AuthorizationPendingError,
+  authorizeTools,
+  getTools,
+  getToolsOpenAI,
+} from "./tools-utils.js";

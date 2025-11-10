@@ -1,12 +1,12 @@
 import { Agent as OpenAIAgent, run } from "@openai/agents";
 import type {
   AgentConfig,
+  AgentEvent,
+  AgentEventCallback,
   AgentResponse,
   AgentResponseWithState,
   Message,
   SessionState,
-  AgentEventCallback,
-  AgentEvent,
 } from "./types.js";
 import { AuthPattern } from "./types.js";
 
@@ -66,9 +66,7 @@ export class Agent {
       };
       try {
         onEvent(fullEvent);
-      } catch (error) {
-        console.error("Error emitting agent event:", error);
-      }
+      } catch (_error) {}
     }
   }
 
@@ -172,7 +170,6 @@ export class Agent {
     onEvent?: AgentEventCallback
   ): Promise<AgentResponseWithState> {
     try {
-      console.log("running agent with messages", messages);
       // Filter out system messages from the history as they're handled by instructions
       const nonSystemMessages = messages.filter((msg) => msg.role !== "system");
 
@@ -251,8 +248,7 @@ export class Agent {
       if (persistState) {
         try {
           await persistState(state, state.status || "active");
-        } catch (error) {
-          console.error("Failed to persist state:", error);
+        } catch (_error) {
           // Don't throw - state persistence failure shouldn't break the agent response
         }
       }
@@ -322,10 +318,6 @@ export class Agent {
 
     // Update the OpenAI agent's instructions if systemInstructions changed
     if (config.systemInstructions !== undefined) {
-      console.log(
-        "Updating OpenAI agent instructions to: ",
-        config.systemInstructions
-      );
       this.openaiAgent = new OpenAIAgent({
         name: "Assistant",
         instructions: this.config.systemInstructions,

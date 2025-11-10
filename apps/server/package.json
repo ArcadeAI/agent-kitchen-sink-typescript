@@ -12,6 +12,7 @@
   "dependencies": {
     "@elysiajs/cors": "^1.3.3",
     "@gmail-agents/arcade": "workspace:*",
+    "@gmail-agents/agents": "workspace:*",
     "@gmail-agents/auth": "workspace:*",
     "@gmail-agents/db": "workspace:*",
     "better-auth": "catalog:",

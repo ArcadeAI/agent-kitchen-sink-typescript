@@ -1,14 +1,14 @@
+import { getToolsOpenAI } from "@gmail-agents/arcade";
 import { Agent as OpenAIAgent, run } from "@openai/agents";
 import { Agent } from "./openai-agent.js";
 import type {
   AgentConfig,
+  AgentEventCallback,
   AgentResponse,
   AgentResponseWithState,
   Message,
   SessionState,
-  AgentEventCallback,
 } from "./types.js";
-import { getToolsOpenAI } from "@gmail-agents/arcade";
 
 /**
  * Configuration for ReactAgent
@@ -57,8 +57,6 @@ export class ReactAgent extends Agent {
     onEvent?: AgentEventCallback
   ): Promise<AgentResponseWithState> {
     try {
-      console.log("Running React agent with messages", messages);
-
       // Load tools from Arcade if any toolkits or tools are configured
       let openaiTools: any[] = [];
       if (this.toolkits.length > 0 || this.tools.length > 0) {
@@ -67,11 +65,9 @@ export class ReactAgent extends Agent {
             toolkits: this.toolkits,
             tools: this.tools,
             limit: this.toolLimit,
-            userId: userId,
+            userId,
           });
-          console.log(`Loaded ${openaiTools.length} tools from Arcade`);
-        } catch (error) {
-          console.error("Failed to load tools:", error);
+        } catch (_error) {
           // Continue without tools rather than failing
         }
       }
@@ -157,8 +153,7 @@ export class ReactAgent extends Agent {
       if (persistState) {
         try {
           await persistState(state, state.status || "active");
-        } catch (error) {
-          console.error("Failed to persist state:", error);
+        } catch (_error) {
           // Don't throw - state persistence failure shouldn't break the agent response
         }
       }

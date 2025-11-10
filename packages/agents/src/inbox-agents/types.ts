@@ -1,4 +1,4 @@
-export interface Email {
+export type Email = {
   id: string;
   thread_id: string;
   history_id: string;
@@ -14,13 +14,15 @@ export interface Email {
   in_reply_to: string;
   references: string;
   label_ids: string[];
-}
+};
 
-export enum EmailCategory {
-  INBOX = "inbox",
-  SPAM = "spam",
-  TRASH = "trash",
-  URGENT = "urgent",
-  IMPORTANT = "important",
-  MEETING = "meeting",
-}
+export const EmailCategory = {
+  INBOX: "inbox",
+  SPAM: "spam",
+  TRASH: "trash",
+  URGENT: "urgent",
+  IMPORTANT: "important",
+  MEETING: "meeting",
+} as const;
+
+export type EmailCategory = (typeof EmailCategory)[keyof typeof EmailCategory];
