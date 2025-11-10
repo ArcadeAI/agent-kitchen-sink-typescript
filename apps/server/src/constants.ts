@@ -1,0 +1,10 @@
+export enum HttpStatus {
+  BAD_REQUEST = 400,
+  UNAUTHORIZED = 401,
+  NOT_FOUND = 404,
+  FOUND = 302,
+  METHOD_NOT_ALLOWED = 405,
+  INTERNAL_SERVER_ERROR = 500,
+}
+
+export const SERVER_PORT = 3000;

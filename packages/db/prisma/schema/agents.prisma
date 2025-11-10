@@ -1,0 +1,44 @@
+model AgentSession {
+  id          String   @id @default(cuid())
+  userId      String
+  agentId     String
+  currentStep Int      @default(0)
+  status      String   @default("active") // "active", "paused", "completed", "waiting_auth", "waiting_input"
+  stateData   Json?    // Store step-specific data (emails, summaries, etc.)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  items       SessionItem[]
+
+  @@index([userId, agentId])
+  @@index([userId, status])
+  @@map("agent_session")
+}
+
+// Unified event stream - everything that happens in a session
+model SessionItem {
+  id        String   @id @default(cuid())
+  sessionId String
+  type      String   // "user_message", "assistant_message", "system_message", "step_started", "step_completed", "step_progress", "state_updated", "error", "complete", "auth_required"
+  timestamp BigInt   // Unix timestamp in milliseconds for ordering
+  
+  // Message fields (for user_message, assistant_message, system_message types)
+  role      String?  // "user", "assistant", "system" (for message types)
+  content   String?  // Message content
+  
+  // Event fields (for step/state/error types)
+  step      String?  // Step name
+  stepIndex Int?     // Step index
+  data      Json?    // Event-specific data (auth configs, step data, etc.)
+  state     Json?    // Session state snapshot
+  error     String?  // Error message
+  
+  createdAt DateTime @default(now())
+
+  session   AgentSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, timestamp])
+  @@index([sessionId, type])
+  @@map("session_item")
+}
+
