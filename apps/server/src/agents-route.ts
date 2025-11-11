@@ -20,12 +20,14 @@ type AgentWithPersistence = {
   runAgent: (
     messages: Message[],
     userId: string,
-    sessionState?: SessionState,
-    persistState?: (
-      state: SessionState,
-      status?: SessionState["status"]
-    ) => Promise<void>,
-    onEvent?: AgentEventCallback
+    options?: {
+      sessionState?: SessionState;
+      persistState?: (
+        state: SessionState,
+        status?: SessionState["status"]
+      ) => Promise<void>;
+      onEvent?: AgentEventCallback;
+    }
   ) => Promise<AgentResponseWithState>;
 };
 
@@ -522,13 +524,11 @@ export const agentsRoute = new Elysia()
 
             try {
               // Run agent with event callback
-              const response = await agent.runAgent(
-                messages,
-                session.user.id,
+              const response = await agent.runAgent(messages, session.user.id, {
                 sessionState,
                 persistState,
-                onEvent
-              );
+                onEvent,
+              });
 
               // Only save response and send complete event if stream wasn't closed early
               if (!shouldCloseStream) {
@@ -759,13 +759,11 @@ export const agentsRoute = new Elysia()
 
             try {
               // Run agent with event callback (no new user message, agent continues from state)
-              const response = await agent.runAgent(
-                messages,
-                session.user.id,
+              const response = await agent.runAgent(messages, session.user.id, {
                 sessionState,
                 persistState,
-                onEvent
-              );
+                onEvent,
+              });
 
               // Only save response and send complete event if stream wasn't closed early
               if (!shouldCloseStream) {
