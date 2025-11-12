@@ -1,4 +1,13 @@
-import { Agent as OpenAIAgent, run } from "@openai/agents";
+import {
+  type AgentInputItem,
+  assistant,
+  type FunctionTool,
+  Agent as OpenAIAgent,
+  Runner,
+  RunState,
+  type RunToolApprovalItem,
+  user,
+} from "@openai/agents";
 import type {
   AgentConfig,
   AgentEvent,
@@ -59,17 +68,17 @@ export class Agent {
   /**
    * Helper method to emit events
    */
-  protected emitEvent(
+  protected async emitEvent(
     onEvent: AgentEventCallback | undefined,
     event: Omit<AgentEvent, "timestamp">
-  ): void {
+  ): Promise<void> {
     if (onEvent) {
       const fullEvent: AgentEvent = {
         ...event,
         timestamp: Date.now(),
       };
       try {
-        onEvent(fullEvent);
+        await onEvent(fullEvent);
       } catch (_error) {
         // Intentionally swallow errors from event callbacks to prevent agent failures
       }
@@ -79,7 +88,7 @@ export class Agent {
   /**
    * Helper method to emit auth_required event
    */
-  protected emitAuthRequired(
+  protected async emitAuthRequired(
     onEvent: AgentEventCallback | undefined,
     options: {
       data: Record<string, unknown>;
@@ -87,8 +96,8 @@ export class Agent {
       step?: string;
       stepIndex?: number;
     }
-  ): void {
-    this.emitEvent(onEvent, {
+  ): Promise<void> {
+    await this.emitEvent(onEvent, {
       type: "auth_required",
       data: options.data,
       state: options.state,
@@ -102,7 +111,7 @@ export class Agent {
   /**
    * Helper method to emit waiting_user_input event
    */
-  protected emitWaitingInput(
+  protected async emitWaitingInput(
     onEvent: AgentEventCallback | undefined,
     options: {
       data: Record<string, unknown>;
@@ -110,8 +119,8 @@ export class Agent {
       step?: string;
       stepIndex?: number;
     }
-  ): void {
-    this.emitEvent(onEvent, {
+  ): Promise<void> {
+    await this.emitEvent(onEvent, {
       type: "waiting_user_input",
       data: options.data,
       state: options.state,
@@ -125,7 +134,7 @@ export class Agent {
   /**
    * Helper method to emit tool_call_started event
    */
-  protected emitToolCallStarted(
+  protected async emitToolCallStarted(
     onEvent: AgentEventCallback | undefined,
     options: {
       toolName: string;
@@ -133,8 +142,8 @@ export class Agent {
       step?: string;
       stepIndex?: number;
     }
-  ): void {
-    this.emitEvent(onEvent, {
+  ): Promise<void> {
+    await this.emitEvent(onEvent, {
       type: "tool_call_started",
       data: { toolName: options.toolName },
       state: options.state,
@@ -146,7 +155,7 @@ export class Agent {
   /**
    * Helper method to emit tool_call_completed event
    */
-  protected emitToolCallCompleted(
+  protected async emitToolCallCompleted(
     onEvent: AgentEventCallback | undefined,
     options: {
       toolName: string;
@@ -155,14 +164,55 @@ export class Agent {
       step?: string;
       stepIndex?: number;
     }
-  ): void {
-    this.emitEvent(onEvent, {
+  ): Promise<void> {
+    await this.emitEvent(onEvent, {
       type: "tool_call_completed",
       data: { toolName: options.toolName, result: options.result },
       state: options.state,
       step: options.step,
       stepIndex: options.stepIndex,
     });
+  }
+
+  /**
+   * Helper method to emit events for tool execution results
+   * Extracts tool outputs from the run state and emits them as events
+   */
+  protected async emitToolExecutionResults(
+    onEvent: AgentEventCallback | undefined,
+    result: any,
+    state?: SessionState
+  ): Promise<void> {
+    // Get the state data via toJSON() which provides the generatedItems
+    if (!result?.state || typeof result.state.toJSON !== "function") {
+      return;
+    }
+
+    const stateData = result.state.toJSON();
+    if (!stateData?.generatedItems) {
+      return;
+    }
+
+    // Extract tool execution results from the state
+    const generatedItems = stateData.generatedItems || [];
+
+    for (const item of generatedItems) {
+      // Emit events for tool call outputs (execution results)
+      if (item.type === "tool_call_output_item" && item.rawItem) {
+        const toolName = item.rawItem.name || "unknown_tool";
+        const output = item.output || item.rawItem.output;
+
+        await this.emitEvent(onEvent, {
+          type: "tool_call_completed",
+          data: {
+            toolName,
+            result: output,
+            callId: item.rawItem.callId,
+          },
+          state,
+        });
+      }
+    }
   }
 
   /**
@@ -181,25 +231,107 @@ export class Agent {
         status?: SessionState["status"]
       ) => Promise<void>;
       onEvent?: AgentEventCallback;
+      approvals?: Array<{ approvalId: string; approved: boolean }>;
     }
   ): Promise<AgentResponseWithState> {
-    const { sessionState, persistState, onEvent } = options ?? {};
+    const { sessionState, persistState, onEvent, approvals } = options ?? {};
 
     try {
-      const input = this.prepareConversationInput(messages);
-      const result = await run(this.openaiAgent, input);
+      // Check if we're resuming from a saved RunState
+      const savedRunState = await this.getOpenAIAgentState(
+        this.prepareSessionState(sessionState)
+      );
+
+      // If we have approvals and a saved run state, apply the approvals to the run state
+      let input: AgentInputItem[] | RunState<any, any>;
+      if (savedRunState && approvals && approvals.length > 0) {
+        const interruptions = savedRunState.getInterruptions();
+
+        // Track which interruptions were handled
+        const handledIds = new Set<string>();
+
+        for (const item of interruptions as RunToolApprovalItem[]) {
+          // For each interruption, we will then check if the decision is to approve or reject the tool call
+          if (item.type === "tool_approval_item" && "callId" in item.rawItem) {
+            const callId = item.rawItem.callId;
+            const approval = approvals.find(
+              (approval) => approval.approvalId === callId
+            );
+
+            if (approval?.approved) {
+              savedRunState.approve(item);
+              handledIds.add(callId);
+            } else if (approval?.approved === false) {
+              savedRunState.reject(item);
+              handledIds.add(callId);
+            }
+          }
+        }
+
+        // All interruptions have been handled, clear the saved state and continue
+        const state = this.prepareSessionState(sessionState);
+        state.stepData.OpenAIAgentState = undefined;
+        await this.persistStateIfNeeded(persistState, state);
+        input = savedRunState;
+      } else {
+        input = this.prepareConversationInput(messages);
+      }
+
+      const runner = new Runner();
+      const result = await runner.run(this.openaiAgent, input);
+
+      if (result.interruptions.length > 0) {
+        // If the run resulted in one or more interruptions, we will store the current state in the database
+        const state = this.prepareSessionState(sessionState);
+
+        // Store the RunState so we can resume later
+        const runStateString = await result.state.toString();
+        state.stepData.OpenAIAgentState = runStateString;
+
+        const status: SessionState["status"] = "waiting_input";
+        state.status = status;
+
+        // Persist the state
+        await this.persistStateIfNeeded(persistState, state);
+
+        // Emit any tool execution results that happened before this interruption
+        // This allows the UI to show errors or results from previous tool calls
+        await this.emitToolExecutionResults(onEvent, result, state);
+
+        // We will return all the interruptions as approval requests to the UI/client so it can generate
+        // the UI for approvals
+        // We will also still return the history that contains the tool calls and potentially any interim
+        // text response the agent might have generated (like announcing that it's calling a function)
+        await this.emitWaitingInput(onEvent, {
+          data: {
+            approvals: result.interruptions
+              .filter((item) => item.type === "tool_approval_item")
+              .map((item) => item.toJSON()),
+          },
+          state,
+          step: "waiting_input",
+        });
+
+        return {
+          content: "Waiting for tool approval",
+          metadata: {},
+          sessionState: state,
+          status,
+        };
+      }
+
       const finalOutput = this.extractFinalOutput(result);
       const metadata = this.buildMetadata(result);
       const state = this.prepareSessionState(sessionState);
 
-      this.emitEvent(onEvent, {
+      await this.emitEvent(onEvent, {
         type: "state_updated",
         state,
       });
 
       await this.persistStateIfNeeded(persistState, state);
 
-      this.emitEvent(onEvent, {
+      await this.emitEvent(onEvent, {
         type: "complete",
         state,
         data: {
@@ -215,44 +347,33 @@ export class Agent {
         status: state.status || "active",
       };
     } catch (error) {
-      return this.handleAgentError(error, onEvent);
+      return await this.handleAgentError(error, onEvent);
     }
   }
 
-  private prepareConversationInput(messages: Message[]): string {
-    const nonSystemMessages = messages.filter((msg) => msg.role !== "system");
-
-    if (nonSystemMessages.length === 0) {
-      throw new Error("No messages provided");
+  private async getOpenAIAgentState(
+    sessionState: SessionState
+  ): Promise<RunState<any, any> | undefined> {
+    if (sessionState.stepData.OpenAIAgentState !== undefined) {
+      return await RunState.fromString(
+        this.openaiAgent,
+        sessionState.stepData.OpenAIAgentState as string
+      );
     }
-
-    const conversationParts = this.buildConversationParts(nonSystemMessages);
-    const lastUserMessage = nonSystemMessages
-      .filter((m) => m.role === "user")
-      .pop();
-
-    if (!lastUserMessage) {
-      throw new Error("No user message found in conversation");
-    }
-
-    if (conversationParts.length > 1) {
-      const context = conversationParts.slice(0, -1).join("\n");
-      return `${context}\n\nUser: ${lastUserMessage.content}`;
-    }
-
-    return lastUserMessage.content;
   }
 
-  protected buildConversationParts(messages: Message[]): string[] {
-    const parts: string[] = [];
-    for (const msg of messages) {
-      if (msg.role === "user") {
-        parts.push(`User: ${msg.content}`);
-      } else if (msg.role === "assistant") {
-        parts.push(`Assistant: ${msg.content}`);
+  private prepareConversationInput(
+    messages: Message[]
+  ): AgentInputItem[] | RunState<any, any> {
+    const inputItems: AgentInputItem[] = [];
+    for (const message of messages) {
+      if (message.role === "user") {
+        inputItems.push(user(message.content));
+      } else if (message.role === "assistant") {
+        inputItems.push(assistant(message.content));
       }
     }
-    return parts;
+    return inputItems;
   }
 
   private extractFinalOutput(result: { finalOutput: unknown }): string {
@@ -304,14 +425,14 @@ export class Agent {
     }
   }
 
-  private handleAgentError(
+  private async handleAgentError(
     error: unknown,
     onEvent?: AgentEventCallback
-  ): never {
+  ): Promise<never> {
     const errorMessage =
       error instanceof Error ? error.message : "Unknown error";
 
-    this.emitEvent(onEvent, {
+    await this.emitEvent(onEvent, {
       type: "error",
       error: errorMessage,
     });
@@ -359,5 +480,9 @@ export class Agent {
         instructions: this.config.systemInstructions,
       });
     }
+  }
+
+  addTools(tools: FunctionTool[]): void {
+    this.openaiAgent.tools = [...(this.openaiAgent.tools || []), ...tools];
   }
 }

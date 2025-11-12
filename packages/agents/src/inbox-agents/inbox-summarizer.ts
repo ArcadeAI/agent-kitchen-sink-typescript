@@ -1,5 +1,9 @@
 import type { AuthEvent } from "@gmail-agents/arcade";
-import arcadeClient, { authorizeTools, getTools } from "@gmail-agents/arcade";
+import arcadeClient, {
+  authorizeTools,
+  getTools,
+  getToolsOpenAI,
+} from "@gmail-agents/arcade";
 import { Agent } from "../openai-agent.js";
 import type {
   AgentConfig,
@@ -50,9 +54,10 @@ export class InboxSummarizer extends Agent {
         status?: SessionState["status"]
       ) => Promise<void>;
       onEvent?: AgentEventCallback;
+      approvals?: Array<{ approvalId: string; approved: boolean }>;
     }
   ): Promise<AgentResponseWithState> {
-    const { sessionState, persistState, onEvent } = options ?? {};
+    const { sessionState, persistState, onEvent, approvals } = options ?? {};
     const state = this.initializeState(sessionState);
     const saveState = this.createStatePersister(persistState);
 
@@ -70,10 +75,17 @@ export class InboxSummarizer extends Agent {
 
     // Execute free-chat phase
     state.status = "active";
+    this.addTools(
+      await getToolsOpenAI({
+        tools: ["Gmail.ListEmails", "Gmail.SendEmail", "Slack.SendMessage"],
+        userId,
+      })
+    );
     const chatResponse = await this.handleMessages(messages, userId, {
       state,
       persistState,
       onEvent,
+      approvals,
     });
 
     await saveState(state, state.status || "active");
@@ -142,7 +154,7 @@ export class InboxSummarizer extends Agent {
         continue;
       }
 
-      this.emitStepStarted(onEvent, step, state);
+      await this.emitStepStarted(onEvent, step, state);
 
       const stepResult = await this.runStep(step, userId, state, onEvent);
 
@@ -161,7 +173,7 @@ export class InboxSummarizer extends Agent {
       }
 
       this.markStepCompleted(step, state);
-      this.emitStepCompleted(onEvent, step, state, stepResult.data);
+      await this.emitStepCompleted(onEvent, step, state, stepResult.data);
 
       state.currentStep += 1;
       step = this.steps[state.currentStep];
@@ -170,13 +182,13 @@ export class InboxSummarizer extends Agent {
     return null;
   }
 
-  private emitStepStarted(
+  private async emitStepStarted(
     onEvent: AgentEventCallback | undefined,
     step: string,
     state: SessionState
-  ): void {
+  ): Promise<void> {
     if (onEvent) {
-      onEvent({
+      await onEvent({
         type: "step_started",
         step,
         stepIndex: state.currentStep,
@@ -186,14 +198,14 @@ export class InboxSummarizer extends Agent {
     }
   }
 
-  private emitStepCompleted(
+  private async emitStepCompleted(
     onEvent: AgentEventCallback | undefined,
     step: string,
     state: SessionState,
     data?: Record<string, unknown>
-  ): void {
+  ): Promise<void> {
     if (onEvent) {
-      onEvent({
+      await onEvent({
         type: "step_completed",
         step,
         stepIndex: state.currentStep,
@@ -332,9 +344,9 @@ ${Object.entries(summaries)
     const authResult = await authorizeTools(
       tools,
       userId,
-      (authEvent: AuthEvent) => {
+      async (authEvent: AuthEvent) => {
         // Convert auth event to agent event
-        this.emitAuthRequired(onEvent, {
+        await this.emitAuthRequired(onEvent, {
           data: {
             providerId: authEvent.providerId,
             status: authEvent.status,
@@ -373,7 +385,7 @@ ${Object.entries(summaries)
     status?: string;
   }> {
     // Emit tool call started event
-    this.emitToolCallStarted(onEvent, {
+    await this.emitToolCallStarted(onEvent, {
       toolName: "Gmail.ListEmails",
       state,
       step: "get-emails",
@@ -395,7 +407,7 @@ ${Object.entries(summaries)
       (emails.output?.value as { emails: Email[] })?.emails ?? [];
 
     // Emit tool call completed event
-    this.emitToolCallCompleted(onEvent, {
+    await this.emitToolCallCompleted(onEvent, {
       toolName: "Gmail.ListEmails",
       result: { emailCount: emailList.length },
       state,
@@ -442,12 +454,9 @@ ${Object.entries(summaries)
         status?: SessionState["status"]
       ) => Promise<void>;
       onEvent?: AgentEventCallback;
+      approvals?: Array<{ approvalId: string; approved: boolean }>;
     }
   ): Promise<AgentResponseWithState> {
-    return super.runAgent(messages, userId, {
-      sessionState: options.state,
-      persistState: options.persistState,
-      onEvent: options.onEvent,
-    });
+    return super.runAgent(messages, userId, options);
   }
 }

@@ -79,7 +79,7 @@
       "name": "@gmail-agents/agents",
       "dependencies": {
         "@gmail-agents/arcade": "workspace:*",
-        "@openai/agents": "^0.2.1",
+        "@openai/agents": "catalog:",
         "dotenv": "catalog:",
         "zod": "3",
       },
@@ -136,7 +136,7 @@
     },
   },
   "catalog": {
-    "@openai/agents": "^0.1.2",
+    "@openai/agents": "^0.3.0",
     "@prisma/client": "^6.15.0",
     "better-auth": "^1.3.28",
     "dotenv": "^17.2.2",
@@ -347,13 +347,13 @@
 
     "@noble/hashes": ["@noble/hashes@2.0.1", "", {}, "sha512-XlOlEbQcE9fmuXxrVTXCTlG2nlRXa9Rj3rr5Ue/+tX+nmkgbX720YHh0VR3hBF9xDvwnb8D2shVGOwNx+ulArw=="],
 
-    "@openai/agents": ["@openai/agents@0.2.1", "", { "dependencies": { "@openai/agents-core": "0.2.1", "@openai/agents-openai": "0.2.1", "@openai/agents-realtime": "0.2.1", "debug": "^4.4.0", "openai": "^6" }, "peerDependencies": { "zod": "^3.25.40 || ^4.0" } }, "sha512-fUwGNZ5jC5OsM5VaFac7mYeF9bxt4EbCkfs7UuwYWsrIz2HuF0zbOLH3pk51GlcWuHmRbnbkWziTI/E+N54IMg=="],
+    "@openai/agents": ["@openai/agents@0.3.0", "", { "dependencies": { "@openai/agents-core": "0.3.0", "@openai/agents-openai": "0.3.0", "@openai/agents-realtime": "0.3.0", "debug": "^4.4.0", "openai": "^6" }, "peerDependencies": { "zod": "^3.25.40 || ^4.0" } }, "sha512-afVZc4/ev/jpMDmMHH8DYV0m+b8mEhRuwC0qog14untuxPq6FJFOUG8J6UnKKDf4vXsnODyYbOoXT+qkXGJy/w=="],
 
-    "@openai/agents-core": ["@openai/agents-core@0.2.1", "", { "dependencies": { "debug": "^4.4.0", "openai": "^6" }, "optionalDependencies": { "@modelcontextprotocol/sdk": "^1.17.2" }, "peerDependencies": { "zod": "^3.25.40 || ^4.0" }, "optionalPeers": ["zod"] }, "sha512-1CYv9UPbCrT2tEj/APA1PseaChJ4Tl1Kqn0y9/ApYLrt+AKiYTJhgOxtv9+Wu9hO9+8ePu3g9Ay1IoEqlBxl+A=="],
+    "@openai/agents-core": ["@openai/agents-core@0.3.0", "", { "dependencies": { "debug": "^4.4.0", "openai": "^6" }, "optionalDependencies": { "@modelcontextprotocol/sdk": "^1.17.2" }, "peerDependencies": { "zod": "^3.25.40 || ^4.0" }, "optionalPeers": ["zod"] }, "sha512-2WNHfMzBCwkVfXD6B5bLy7y4SPJbmucvOnSPhqOS25gAEnf7FrVu94hACUP/Q2+qWbGpC6okPb1fwtCI7yZmhw=="],
 
-    "@openai/agents-openai": ["@openai/agents-openai@0.2.1", "", { "dependencies": { "@openai/agents-core": "0.2.1", "debug": "^4.4.0", "openai": "^6" }, "peerDependencies": { "zod": "^3.25.40 || ^4.0" } }, "sha512-2LCPkdXk6aHLwI6mINlYyj/yHYxgshCpZDxhTHIiDbBxWFFBg4bUiJ2KTCH3z7vKKIzm/JFrePvQukMpJoi+XA=="],
+    "@openai/agents-openai": ["@openai/agents-openai@0.3.0", "", { "dependencies": { "@openai/agents-core": "0.3.0", "debug": "^4.4.0", "openai": "^6" }, "peerDependencies": { "zod": "^3.25.40 || ^4.0" } }, "sha512-y3v4m2dUf5jyZnpTnUrqN0Akleje/G78RII81rtdo0iaPhCqcVrH6f/j+nEYqsyhPA+jJCL1gyaasZZR1NTm8g=="],
 
-    "@openai/agents-realtime": ["@openai/agents-realtime@0.2.1", "", { "dependencies": { "@openai/agents-core": "0.2.1", "@types/ws": "^8.18.1", "debug": "^4.4.0", "ws": "^8.18.1" }, "peerDependencies": { "zod": "^3.25.40 || ^4.0" } }, "sha512-x1F8pwvA4Zz2Xt23IqLOyIFUIFafx27sq5yuGfeDP3MDdr2q59af4fXnoJ6wrNoqvjZiKO+JCdwXyYSFHqQmug=="],
+    "@openai/agents-realtime": ["@openai/agents-realtime@0.3.0", "", { "dependencies": { "@openai/agents-core": "0.3.0", "@types/ws": "^8.18.1", "debug": "^4.4.0", "ws": "^8.18.1" }, "peerDependencies": { "zod": "^3.25.40 || ^4.0" } }, "sha512-sa9MuUjWe9bhog3R1JbNQ9u/bIzMy+oiMziWScDerSouVSpauPxA8CcNT9MfBb3yDjDRYLlvuy9DUj2IX958oQ=="],
 
     "@oxc-project/types": ["@oxc-project/types@0.95.0", "", {}, "sha512-vACy7vhpMPhjEJhULNxrdR0D943TkA/MigMpJCHmBHvMXxRStRi/dPtTlfQ3uDwWSzRpT8z+7ImjZVf8JWBocQ=="],
 
@@ -1375,8 +1375,6 @@
 
     "@gmail-agents/agents/zod": ["zod@3.25.76", "", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
 
-    "@gmail-agents/arcade/@openai/agents": ["@openai/agents@0.1.11", "", { "dependencies": { "@openai/agents-core": "0.1.11", "@openai/agents-openai": "0.1.11", "@openai/agents-realtime": "0.1.11", "debug": "^4.4.0", "openai": "^5.20.2" }, "peerDependencies": { "zod": "^3.25.40" } }, "sha512-jnaFt54iP71vYDXvpG3EGX2kVRYIU2xBdCT3uFqdXm4KqFAP9JQFNGiKKBEeE5rbXARpqAQpKH+5HfoANndpcQ=="],
-
     "@isaacs/cliui/string-width": ["string-width@5.1.2", "", { "dependencies": { "eastasianwidth": "^0.2.0", "emoji-regex": "^9.2.2", "strip-ansi": "^7.0.1" } }, "sha512-HnLOCR3vjcY8beoNLtcjZ5/nxn2afmME6lhrDrebokqMap+XbeW8n9TXpPDOqdGK5qcI3oT0GKTW6wC7EMiVqA=="],
 
     "@isaacs/cliui/wrap-ansi": ["wrap-ansi@8.1.0", "", { "dependencies": { "ansi-styles": "^6.1.0", "string-width": "^5.0.1", "strip-ansi": "^7.0.1" } }, "sha512-si7QWI6zUMq56bESFvagtmzMdGOtoxfR+Sez11Mobfc7tm+VkUckk9bW2UeffTGVUbOksxmSw0AA2gs8g71NCQ=="],
@@ -1450,14 +1448,6 @@
     "wrap-ansi-cjs/strip-ansi": ["strip-ansi@6.0.1", "", { "dependencies": { "ansi-regex": "^5.0.1" } }, "sha512-Y38VPSHcqkFrCpFnQ9vuSXmquuv5oXOKpGeT6aGrr3o3Gc9AlVa6JBfUSOCnbxGGZF+/0ooI7KrPuUSztUdU5A=="],
 
     "@arcadeai/arcadejs/@types/node/undici-types": ["undici-types@5.26.5", "", {}, "sha512-JlCMO+ehdEIKqlFxk6IfVoAUVmgz7cU7zD/h9XZ0qzeosSHmUJVOzSQvvYSYWXkFXC+IfLKSIffhv0sVZup6pA=="],
-
-    "@gmail-agents/arcade/@openai/agents/@openai/agents-core": ["@openai/agents-core@0.1.11", "", { "dependencies": { "debug": "^4.4.0", "openai": "^5.20.2" }, "optionalDependencies": { "@modelcontextprotocol/sdk": "^1.17.2" }, "peerDependencies": { "zod": "^3.25.40" }, "optionalPeers": ["zod"] }, "sha512-ye8VIAO2wPIg1zClldIj8We/1R55VmdgnMyn0g4YGbp6RD5Wpv9yfH5kPNWxmHvw8ji+XehyggGoklY4FGQoBQ=="],
-
-    "@gmail-agents/arcade/@openai/agents/@openai/agents-openai": ["@openai/agents-openai@0.1.11", "", { "dependencies": { "@openai/agents-core": "0.1.11", "debug": "^4.4.0", "openai": "^5.20.2" }, "peerDependencies": { "zod": "^3.25.40" } }, "sha512-TYYbY7o1cNxtOIO4F1a20qkqDT1Iwr9ZEi0MO2sEaeioK8rGB/Ux54iFvsA3IblUYyK+5fD25vr4vXFasvg2Kg=="],
-
-    "@gmail-agents/arcade/@openai/agents/@openai/agents-realtime": ["@openai/agents-realtime@0.1.11", "", { "dependencies": { "@openai/agents-core": "0.1.11", "@types/ws": "^8.18.1", "debug": "^4.4.0", "ws": "^8.18.1" }, "peerDependencies": { "zod": "^3.25.40" } }, "sha512-8jaNuYU1acra28i7bYrZIPubI6s2ziY2ZudqAVK2ad+giopXcrNSiJTuZ2S3z+ESnIejwMiYLfnY2Le8W0SJ7A=="],
-
-    "@gmail-agents/arcade/@openai/agents/openai": ["openai@5.23.2", "", { "peerDependencies": { "ws": "^8.18.0", "zod": "^3.23.8" }, "optionalPeers": ["ws", "zod"], "bin": { "openai": "bin/cli" } }, "sha512-MQBzmTulj+MM5O8SKEk/gL8a7s5mktS9zUtAkU257WjvobGc9nKcBuVwjyEEcb9SI8a8Y2G/mzn3vm9n1Jlleg=="],
 
     "@isaacs/cliui/string-width/emoji-regex": ["emoji-regex@9.2.2", "", {}, "sha512-L18DaJsXSUk2+42pv8mLs5jJT2hqFkFE4j21wOmgbUqsZ2hL72NsUU785g9RXgo3s0ZNgVl42TiHp3ZtOv/Vyg=="],
 

@@ -14,7 +14,7 @@
       "typescript": "^5.8.2",
       "tsdown": "^0.15.5",
       "@prisma/client": "^6.15.0",
-      "@openai/agents": "^0.1.2"
+      "@openai/agents": "^0.3.0"
     }
   },
   "scripts": {

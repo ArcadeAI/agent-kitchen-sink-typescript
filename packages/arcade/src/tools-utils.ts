@@ -61,31 +61,10 @@ export async function getTools({
 
   const all_tools = [...from_toolkits.flat(), ...from_tools];
   const unique_tools = Array.from(
-    new Map(all_tools.map((tool) => [tool.qualified_name, tool])).values()
+    new Map(all_tools.map((t) => [t.qualified_name, t])).values()
   );
 
   return unique_tools;
-
-  /*
-    const toolWithApproval = (zodTool: ZodTool<any>) => {
-        // If the tool is in the list of tools that need approval, we need to
-        // indicate that the tool needs approval. This will trigger an interrupt,
-        // and we can approve or reject the tool call from the chatbot loop.
-        return tool({
-            ...zodTool,
-            needsApproval: async (_ctx, _input) => {
-                return TOOLS_WITH_APPROVAL.includes(zodTool.name);
-            },
-        });
-    };
-
-    return toZod({
-        tools: unique_tools,
-        client: arcade,
-        userId: userId,
-        executeFactory: executeOrDie,
-    }).map(enforceApproval ? toolWithApproval : tool);
-    */
 }
 
 // TODO: Figure out a more elegant way to do this for multiple profiders
@@ -99,12 +78,13 @@ export async function getToolsOpenAI({
     throw new Error("userId is required");
   }
   const arcadeTools = await getTools({ toolkits, tools, limit });
-  const toolWithApproval = (zodTool: ZodTool<any>) => {
+  const toolWithApproval = (zodTool: ZodTool) => {
     // If the tool is in the list of tools that need approval, we need to
     // indicate that the tool needs approval. This will trigger an interrupt,
     // and we can approve or reject the tool call from the chatbot loop.
     return tool({
       ...zodTool,
+      //needsApproval: true,
       needsApproval: async (_ctx: any, _input: any) =>
         TOOLS_WITH_APPROVAL.includes(zodTool.name),
     });
@@ -125,12 +105,11 @@ export async function getToolsOpenAI({
  * @deprecated Use the event-based authorizeTools function instead
  */
 export class AuthorizationPendingError extends Error {
-  constructor(
-    message: string,
-    public authResponses: AuthorizationResponse[]
-  ) {
+  authResponses: AuthorizationResponse[];
+  constructor(message: string, authResponses: AuthorizationResponse[]) {
     super(message);
     this.name = "AuthorizationPendingError";
+    this.authResponses = authResponses;
   }
 }
 
@@ -140,15 +119,15 @@ export async function authorizeTools(
   onEvent?: (event: AuthEvent) => void | Promise<void>
 ): Promise<{ completed: boolean; authResponses: AuthorizationResponse[] }> {
   const providerToScopes = new Map<string, Set<string>>();
-  for (const tool of tools) {
-    const providerId = tool.requirements?.authorization?.provider_id;
+  for (const t of tools) {
+    const providerId = t.requirements?.authorization?.provider_id;
     if (providerId) {
       let scopesSet = providerToScopes.get(providerId);
       if (!scopesSet) {
         scopesSet = new Set<string>();
         providerToScopes.set(providerId, scopesSet);
       }
-      const newScopes = tool.requirements?.authorization?.oauth2?.scopes ?? [];
+      const newScopes = t.requirements?.authorization?.oauth2?.scopes ?? [];
       for (const scope of newScopes) {
         scopesSet.add(scope);
       }

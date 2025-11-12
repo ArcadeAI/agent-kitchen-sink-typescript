@@ -22,7 +22,7 @@
   },
   "dependencies": {
     "@gmail-agents/arcade": "workspace:*",
-    "@openai/agents": "^0.2.1",
+    "@openai/agents": "catalog:",
     "dotenv": "catalog:",
     "zod": "3"
   }

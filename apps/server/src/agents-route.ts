@@ -3,7 +3,11 @@ import type {
   Message,
   SessionState,
 } from "@gmail-agents/agents";
-import { Agent, type AgentConfig } from "@gmail-agents/agents";
+import {
+  type AgentConfig,
+  ReactAgent,
+  type ReactAgentConfig,
+} from "@gmail-agents/agents";
 import { InboxSummarizer } from "@gmail-agents/agents/inbox-agents/inbox-summarizer";
 // Import event types using wildcard export
 import type {
@@ -27,11 +31,15 @@ type AgentWithPersistence = {
         status?: SessionState["status"]
       ) => Promise<void>;
       onEvent?: AgentEventCallback;
+      approvals?: Array<{ approvalId: string; approved: boolean }>;
     }
   ) => Promise<AgentResponseWithState>;
 };
 
-const AGENT_CONFIGS: Record<string, { systemInstructions: string }> = {
+const AGENT_CONFIGS: Record<
+  string,
+  Partial<AgentConfig> | Partial<ReactAgentConfig>
+> = {
   "inbox-summarizer": {
     systemInstructions:
       "You are an inbox summarizer assistant. Help users summarize their emails efficiently.",
@@ -39,31 +47,31 @@ const AGENT_CONFIGS: Record<string, { systemInstructions: string }> = {
   "inbox-prioritizer": {
     systemInstructions:
       "You are an inbox prioritization assistant. Help users prioritize their emails by identifying urgent and important messages. Focus on helping users focus on what matters most and manage their email workflow effectively.",
+    toolkits: ["gmail"],
   },
   "meeting-prep": {
     systemInstructions:
       "You are a meeting preparation assistant. Help users prepare for meetings by analyzing relevant emails, extracting key information, and summarizing important points. Focus on providing context and action items related to upcoming meetings.",
+    toolkits: ["gmail"],
   },
 };
 
 /**
  * Factory function to create a stateless agent instance
  */
-function createAgent(agentId: string): AgentWithPersistence {
+async function createAgent(
+  agentId: string,
+  userId: string
+): Promise<AgentWithPersistence> {
   const config = AGENT_CONFIGS[agentId];
   if (!config) {
     throw new Error(`Unknown agent ID: ${agentId}`);
   }
 
-  const agentConfig: AgentConfig = {
-    model: process.env.OPENAI_MODEL || "gpt-4o",
-    systemInstructions: config.systemInstructions,
-  };
-
   if (agentId === "inbox-summarizer") {
-    return new InboxSummarizer(agentConfig) as AgentWithPersistence;
+    return new InboxSummarizer(config) as AgentWithPersistence;
   }
-  return new Agent(agentConfig) as AgentWithPersistence;
+  return await ReactAgent.create({ ...config, userId } as ReactAgentConfig);
 }
 
 export const agentsRoute = new Elysia()
@@ -382,6 +390,42 @@ export const agentsRoute = new Elysia()
           }
         }
 
+        // Handle approvals if provided
+        let approvalsToPass:
+          | Array<{ approvalId: string; approved: boolean }>
+          | undefined;
+        if (
+          body.approvals &&
+          Array.isArray(body.approvals) &&
+          !lastEventTimestamp
+        ) {
+          approvalsToPass = body.approvals;
+          for (const approval of body.approvals) {
+            await prisma.sessionItem.create({
+              data: {
+                sessionId: agentSession.id,
+                type: approval.approved
+                  ? "tool_approval_granted"
+                  : "tool_approval_rejected",
+                timestamp: BigInt(Date.now()),
+                data: {
+                  approvalId: approval.approvalId,
+                  approved: approval.approved,
+                },
+              },
+            });
+          }
+
+          // Update session status back to active
+          await prisma.agentSession.update({
+            where: { id: agentSession.id },
+            data: {
+              status: "active",
+              updatedAt: new Date(),
+            },
+          });
+        }
+
         // Track if we added a new message
         let newUserMessage: Message | null = null;
 
@@ -414,9 +458,20 @@ export const agentsRoute = new Elysia()
         // Convert database items (only message types) to agent format
         const messages = agentSession.items
           .filter((item) =>
-            ["user_message", "assistant_message", "system_message"].includes(
-              item.type
-            )
+            [
+              "user_message",
+              "assistant_message",
+              "system_message",
+              "tool_call_started",
+              "tool_call_completed",
+              "tool_call_result",
+              "tool_approval_item",
+              "tool_authorization_required",
+              "tool_authorization_granted",
+              "tool_authorization_denied",
+              "tool_authorization_expired",
+              "tool_authorization_revoked",
+            ].includes(item.type)
           )
           .map(
             (item: {
@@ -435,7 +490,7 @@ export const agentsRoute = new Elysia()
         }
 
         // Create agent instance (stateless)
-        const agent = createAgent(agentSession.agentId);
+        const agent = await createAgent(agentSession.agentId, session.user.id);
 
         // Create persistence callback for the agent
         const persistState = async (
@@ -528,6 +583,7 @@ export const agentsRoute = new Elysia()
                 sessionState,
                 persistState,
                 onEvent,
+                approvals: approvalsToPass,
               });
 
               // Only save response and send complete event if stream wasn't closed early
@@ -610,6 +666,14 @@ export const agentsRoute = new Elysia()
       }),
       body: t.Object({
         message: t.Optional(t.String()),
+        approvals: t.Optional(
+          t.Array(
+            t.Object({
+              approvalId: t.String(),
+              approved: t.Boolean(),
+            })
+          )
+        ),
       }),
       query: t.Object({
         lastEventTimestamp: t.Optional(t.String()),
@@ -675,7 +739,7 @@ export const agentsRoute = new Elysia()
           );
 
         // Create agent instance (stateless)
-        const agent = createAgent(agentSession.agentId);
+        const agent = await createAgent(agentSession.agentId, session.user.id);
 
         // Create persistence callback for the agent
         const persistState = async (

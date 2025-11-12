@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { type AuthStatus, OAuthAuthMessage } from "./oauth-auth-message";
+import { OpenAIApprovals, type ToolApproval } from "./openai-approvals";
 
 // Unified item type - everything that happens in a session
 type SessionItem = {
@@ -77,65 +78,313 @@ export function Chatbot({ agentId, agentName }: ChatbotProps) {
   }, [agentId]);
 
   // Helper: Convert API session items to SessionItem type
-  const convertSessionItems = (rawItems: unknown[]): SessionItem[] =>
-    (
-      rawItems as Array<{
-        id: string;
-        type: string;
-        timestamp: number;
-        role?: string;
-        content?: string;
-        step?: string;
-        stepIndex?: number;
-        data?: unknown;
-        state?: unknown;
-        error?: string;
-      }>
-    ).map((item) => ({
-      id: item.id,
-      type: item.type,
-      timestamp: item.timestamp,
-      role: item.role as "user" | "assistant" | "system" | undefined,
-      content: item.content,
-      step: item.step,
-      stepIndex: item.stepIndex,
-      data: item.data as Record<string, unknown> | undefined,
-      state: item.state,
-      error: item.error,
-    }));
+  const convertSessionItems = useCallback(
+    (rawItems: unknown[]): SessionItem[] =>
+      (
+        rawItems as Array<{
+          id: string;
+          type: string;
+          timestamp: number;
+          role?: string;
+          content?: string;
+          step?: string;
+          stepIndex?: number;
+          data?: unknown;
+          state?: unknown;
+          error?: string;
+        }>
+      ).map((item) => ({
+        id: item.id,
+        type: item.type,
+        timestamp: item.timestamp,
+        role: item.role as "user" | "assistant" | "system" | undefined,
+        content: item.content,
+        step: item.step,
+        stepIndex: item.stepIndex,
+        data: item.data as Record<string, unknown> | undefined,
+        state: item.state,
+        error: item.error,
+      })),
+    []
+  );
 
   // Helper: Filter out message-type items to get events only
-  const filterEventItems = (sessionItems: SessionItem[]): SessionItem[] =>
-    sessionItems.filter(
-      (item) =>
-        !["user_message", "assistant_message", "system_message"].includes(
-          item.type
-        )
-    );
+  const filterEventItems = useCallback(
+    (sessionItems: SessionItem[]): SessionItem[] =>
+      sessionItems.filter(
+        (item) =>
+          !["user_message", "assistant_message", "system_message"].includes(
+            item.type
+          )
+      ),
+    []
+  );
 
   // Helper: Update last event timestamp from items
-  const updateLastEventTimestamp = (eventItems: SessionItem[]) => {
+  const updateLastEventTimestamp = useCallback((eventItems: SessionItem[]) => {
     if (eventItems.length > 0) {
       const lastTimestamp = Math.max(...eventItems.map((e) => e.timestamp));
       setLastEventTimestamp(lastTimestamp);
     } else {
       setLastEventTimestamp(null);
     }
-  };
+  }, []);
 
   // Helper: Check if stream should be resumed
-  const shouldResumeStream = (
-    status: string | undefined,
-    eventItems: SessionItem[]
-  ): boolean => {
-    if (status !== "active" || eventItems.length === 0) {
-      return false;
+  const shouldResumeStream = useCallback(
+    (status: string | undefined, eventItems: SessionItem[]): boolean => {
+      if (status !== "active" || eventItems.length === 0) {
+        return false;
+      }
+      const lastCompleteEvent = eventItems
+        .filter((e) => e.type === "complete" || e.type === "error")
+        .pop();
+      return !lastCompleteEvent;
+    },
+    []
+  );
+
+  // Helper: Update state from event
+  const updateStateFromEvent = useCallback(
+    (event: { timestamp?: number; state?: unknown }) => {
+      if (event.timestamp) {
+        setLastEventTimestamp(event.timestamp);
+      }
+      if (
+        event.state &&
+        typeof event.state === "object" &&
+        "status" in event.state
+      ) {
+        setSessionStatus((event.state as { status: string }).status);
+      }
+    },
+    []
+  );
+
+  // Helper: Convert event to SessionItem
+  const eventToSessionItem = useCallback(
+    (event: {
+      type: string;
+      timestamp?: number;
+      role?: string;
+      content?: string;
+      step?: string;
+      stepIndex?: number;
+      data?: Record<string, unknown>;
+      state?: unknown;
+      error?: string;
+    }): SessionItem => ({
+      id: crypto.randomUUID(),
+      type: event.type,
+      timestamp: event.timestamp || Date.now(),
+      role: event.role as "user" | "assistant" | "system" | undefined,
+      content: event.content,
+      step: event.step,
+      stepIndex: event.stepIndex,
+      data: event.data,
+      state: event.state,
+      error: event.error,
+    }),
+    []
+  );
+
+  // Helper: Add session item (avoiding duplicates)
+  const addSessionItem = useCallback((sessionItem: SessionItem) => {
+    setItems((prev) => {
+      if (
+        prev.some(
+          (item) =>
+            item.timestamp === sessionItem.timestamp &&
+            item.type === sessionItem.type
+        )
+      ) {
+        return prev;
+      }
+      return [...prev, sessionItem];
+    });
+  }, []);
+
+  // Helper: Handle state_updated event
+  const handleStateUpdated = useCallback((data?: Record<string, unknown>) => {
+    if (data && (data as { message?: string }).message === "Stream started") {
+      setIsLoading(false);
     }
-    const lastCompleteEvent = eventItems
-      .filter((e) => e.type === "complete" || e.type === "error")
-      .pop();
-    return !lastCompleteEvent;
-  };
+  }, []);
+
+  // Helper: Handle auth_required event
+  const handleAuthRequired = useCallback((state?: unknown) => {
+    setIsLoading(false);
+    if (state && typeof state === "object" && "status" in state) {
+      setSessionStatus((state as { status: string }).status);
+    }
+  }, []);
+
+  // Helper: Handle complete event
+  const handleComplete = useCallback((data?: Record<string, unknown>) => {
+    setIsLoading(false);
+    if (data) {
+      const typedData = data as { status?: string };
+      if (typedData.status) {
+        setSessionStatus(typedData.status);
+      }
+    }
+  }, []);
+
+  // Helper: Handle error event
+  const handleError = useCallback(() => {
+    setIsLoading(false);
+    setSessionStatus("active");
+  }, []);
+
+  // Helper: Handle different event types
+  const handleEventType = useCallback(
+    (event: {
+      type: string;
+      data?: Record<string, unknown>;
+      state?: unknown;
+    }) => {
+      switch (event.type) {
+        case "state_updated":
+          handleStateUpdated(event.data);
+          break;
+        case "step_started":
+          setIsLoading(false);
+          break;
+        case "auth_required":
+          handleAuthRequired(event.state);
+          break;
+        case "complete":
+          handleComplete(event.data);
+          break;
+        case "error":
+          handleError();
+          break;
+        default:
+          // Ignore unknown event types
+          break;
+      }
+    },
+    [handleStateUpdated, handleAuthRequired, handleComplete, handleError]
+  );
+
+  // Helper: Process a single line from stream
+  const processStreamLine = useCallback(
+    (line: string) => {
+      if (!line.trim()) {
+        return;
+      }
+
+      try {
+        const event = JSON.parse(line);
+        updateStateFromEvent(event);
+        const sessionItem = eventToSessionItem(event);
+        addSessionItem(sessionItem);
+        handleEventType(event);
+      } catch (_parseError) {
+        // silently ignore parse error
+      }
+    },
+    [updateStateFromEvent, eventToSessionItem, addSessionItem, handleEventType]
+  );
+
+  // Helper: Read and process stream chunks
+  const readStreamChunk = useCallback(
+    async (
+      reader: ReadableStreamDefaultReader<Uint8Array>,
+      decoder: TextDecoder,
+      buffer: string
+    ): Promise<{ buffer: string; done: boolean }> => {
+      const { done, value } = await reader.read();
+      if (done) {
+        return { buffer, done: true };
+      }
+
+      const newBuffer = buffer + decoder.decode(value, { stream: true });
+      const lines = newBuffer.split("\n");
+      const remainingBuffer = lines.pop() || "";
+
+      for (const line of lines) {
+        processStreamLine(line);
+      }
+
+      return { buffer: remainingBuffer, done: false };
+    },
+    [processStreamLine]
+  );
+
+  // Process stream events - converts incoming events to items
+  const processStream = useCallback(
+    async (body: ReadableStream<Uint8Array>, _controller: AbortController) => {
+      const reader = body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      try {
+        let done = false;
+        while (!done) {
+          const result = await readStreamChunk(reader, decoder, buffer);
+          buffer = result.buffer;
+          done = result.done;
+        }
+
+        // Process any remaining data in the buffer after stream closes
+        if (buffer.trim()) {
+          processStreamLine(buffer);
+        }
+      } catch (error) {
+        if (error instanceof Error && error.name !== "AbortError") {
+          // Log non-abort errors (silently)
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    },
+    [readStreamChunk, processStreamLine]
+  );
+
+  // Resume stream from last event timestamp
+  const resumeStream = useCallback(
+    async (targetSessionId: string, timestamp: number) => {
+      if (!timestamp) {
+        return;
+      }
+
+      const API_URL =
+        import.meta.env.VITE_SERVER_URL || "http://localhost:3000";
+      const controller = new AbortController();
+      streamControllerRef.current = controller;
+
+      try {
+        const response = await fetch(
+          `${API_URL}/api/agents/sessions/${targetSessionId}/chat/stream?lastEventTimestamp=${timestamp}`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            credentials: "include",
+            body: JSON.stringify({}),
+            signal: controller.signal,
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        if (!response.body) {
+          throw new Error("No response body");
+        }
+
+        await processStream(response.body, controller);
+      } catch (error) {
+        if (error instanceof Error && error.name !== "AbortError") {
+          // Log non-abort errors (silently)
+        }
+      }
+    },
+    [processStream]
+  );
 
   // Load session items (unified messages and events)
   const loadSession = useCallback(
@@ -188,7 +437,14 @@ export function Chatbot({ agentId, agentName }: ChatbotProps) {
         // Silently handle session loading errors
       }
     },
-    [agentId]
+    [
+      agentId,
+      convertSessionItems,
+      filterEventItems,
+      updateLastEventTimestamp,
+      shouldResumeStream,
+      resumeStream,
+    ]
   );
 
   // Create new session
@@ -248,227 +504,6 @@ export function Chatbot({ agentId, agentName }: ChatbotProps) {
 
     initializeSession();
   }, [agentId, createNewSession, loadSession]);
-
-  // Resume stream from last event timestamp
-  const resumeStream = async (targetSessionId: string, timestamp: number) => {
-    if (!timestamp) {
-      return;
-    }
-
-    const API_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:3000";
-    const controller = new AbortController();
-    streamControllerRef.current = controller;
-
-    try {
-      const response = await fetch(
-        `${API_URL}/api/agents/sessions/${targetSessionId}/chat/stream?lastEventTimestamp=${timestamp}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          credentials: "include",
-          body: JSON.stringify({}),
-          signal: controller.signal,
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      if (!response.body) {
-        throw new Error("No response body");
-      }
-
-      await processStream(response.body, controller);
-    } catch (error) {
-      if (error instanceof Error && error.name !== "AbortError") {
-        // Log non-abort errors (silently)
-      }
-    }
-  };
-
-  // Helper: Update state from event
-  const updateStateFromEvent = (event: {
-    timestamp?: number;
-    state?: unknown;
-  }) => {
-    if (event.timestamp) {
-      setLastEventTimestamp(event.timestamp);
-    }
-    if (
-      event.state &&
-      typeof event.state === "object" &&
-      "status" in event.state
-    ) {
-      setSessionStatus((event.state as { status: string }).status);
-    }
-  };
-
-  // Helper: Convert event to SessionItem
-  const eventToSessionItem = (event: {
-    type: string;
-    timestamp?: number;
-    role?: string;
-    content?: string;
-    step?: string;
-    stepIndex?: number;
-    data?: Record<string, unknown>;
-    state?: unknown;
-    error?: string;
-  }): SessionItem => ({
-    id: crypto.randomUUID(),
-    type: event.type,
-    timestamp: event.timestamp || Date.now(),
-    role: event.role as "user" | "assistant" | "system" | undefined,
-    content: event.content,
-    step: event.step,
-    stepIndex: event.stepIndex,
-    data: event.data,
-    state: event.state,
-    error: event.error,
-  });
-
-  // Helper: Add session item (avoiding duplicates)
-  const addSessionItem = (sessionItem: SessionItem) => {
-    setItems((prev) => {
-      if (
-        prev.some(
-          (item) =>
-            item.timestamp === sessionItem.timestamp &&
-            item.type === sessionItem.type
-        )
-      ) {
-        return prev;
-      }
-      return [...prev, sessionItem];
-    });
-  };
-
-  // Helper: Handle state_updated event
-  const handleStateUpdated = (data?: Record<string, unknown>) => {
-    if (data && (data as { message?: string }).message === "Stream started") {
-      setIsLoading(false);
-    }
-  };
-
-  // Helper: Handle auth_required event
-  const handleAuthRequired = (state?: unknown) => {
-    setIsLoading(false);
-    if (state && typeof state === "object" && "status" in state) {
-      setSessionStatus((state as { status: string }).status);
-    }
-  };
-
-  // Helper: Handle complete event
-  const handleComplete = (data?: Record<string, unknown>) => {
-    setIsLoading(false);
-    if (data) {
-      const typedData = data as { status?: string };
-      if (typedData.status) {
-        setSessionStatus(typedData.status);
-      }
-    }
-  };
-
-  // Helper: Handle error event
-  const handleError = () => {
-    setIsLoading(false);
-    setSessionStatus("active");
-  };
-
-  // Helper: Handle different event types
-  const handleEventType = (event: {
-    type: string;
-    data?: Record<string, unknown>;
-    state?: unknown;
-  }) => {
-    switch (event.type) {
-      case "state_updated":
-        handleStateUpdated(event.data);
-        break;
-      case "step_started":
-        setIsLoading(false);
-        break;
-      case "auth_required":
-        handleAuthRequired(event.state);
-        break;
-      case "complete":
-        handleComplete(event.data);
-        break;
-      case "error":
-        handleError();
-        break;
-      default:
-        // Ignore unknown event types
-        break;
-    }
-  };
-
-  // Helper: Process a single line from stream
-  const processStreamLine = (line: string) => {
-    if (!line.trim()) {
-      return;
-    }
-
-    try {
-      const event = JSON.parse(line);
-      updateStateFromEvent(event);
-      const sessionItem = eventToSessionItem(event);
-      addSessionItem(sessionItem);
-      handleEventType(event);
-    } catch (_parseError) {
-      // Silently handle JSON parse errors
-    }
-  };
-
-  // Helper: Read and process stream chunks
-  const readStreamChunk = async (
-    reader: ReadableStreamDefaultReader<Uint8Array>,
-    decoder: TextDecoder,
-    buffer: string
-  ): Promise<{ buffer: string; done: boolean }> => {
-    const { done, value } = await reader.read();
-    if (done) {
-      return { buffer, done: true };
-    }
-
-    const newBuffer = buffer + decoder.decode(value, { stream: true });
-    const lines = newBuffer.split("\n");
-    const remainingBuffer = lines.pop() || "";
-
-    for (const line of lines) {
-      processStreamLine(line);
-    }
-
-    return { buffer: remainingBuffer, done: false };
-  };
-
-  // Process stream events - converts incoming events to items
-  const processStream = async (
-    body: ReadableStream<Uint8Array>,
-    _controller: AbortController
-  ) => {
-    const reader = body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    try {
-      let done = false;
-      while (!done) {
-        const result = await readStreamChunk(reader, decoder, buffer);
-        buffer = result.buffer;
-        done = result.done;
-      }
-    } catch (error) {
-      if (error instanceof Error && error.name !== "AbortError") {
-        // Log non-abort errors (silently)
-      }
-    } finally {
-      reader.releaseLock();
-    }
-  };
 
   // Helper: Check if message can be sent
   const canSendMessage = (): boolean => {
@@ -696,6 +731,101 @@ export function Chatbot({ agentId, agentName }: ChatbotProps) {
     </div>
   );
 
+  // Helper: Render waiting_user_input (approvals) item
+  const renderApprovalsItem = (item: SessionItem) => {
+    if (!(item.data && sessionId)) {
+      return null;
+    }
+    const approvalData = item.data as { approvals?: ToolApproval[] };
+    if (!approvalData.approvals || approvalData.approvals.length === 0) {
+      return null;
+    }
+    return (
+      <OpenAIApprovals
+        approvals={approvalData.approvals}
+        key={item.id}
+        onApprovalResponse={async () => {
+          // Reload the session to get updated state after approval/rejection
+          await loadSession(sessionId);
+          await fetchSessions();
+        }}
+        onStreamEvent={processStreamLine}
+        sessionId={sessionId}
+      />
+    );
+  };
+
+  // Helper: Render tool call completed/result item
+  const renderToolCallItem = (item: SessionItem) => {
+    if (!item.data) {
+      return null;
+    }
+    const toolData = item.data as {
+      toolName?: string;
+      result?: string | object;
+      callId?: string;
+    };
+
+    let resultText = "";
+    let hasError = false;
+
+    try {
+      // Parse the result if it's a string
+      const resultObj =
+        typeof toolData.result === "string"
+          ? JSON.parse(toolData.result)
+          : toolData.result;
+
+      // Check if this is an error result
+      if (resultObj?.output?.error) {
+        hasError = true;
+        resultText = resultObj.output.error.message || "Tool execution failed";
+      } else {
+        resultText = JSON.stringify(resultObj, null, 2);
+      }
+    } catch (_e) {
+      resultText =
+        typeof toolData.result === "string"
+          ? toolData.result
+          : JSON.stringify(toolData.result, null, 2);
+    }
+
+    return (
+      <div className="flex w-full justify-start" key={item.id}>
+        <div
+          className={cn(
+            "max-w-[80%] rounded-lg border px-4 py-2",
+            hasError
+              ? "border-destructive/50 bg-destructive/10"
+              : "border-muted-foreground/20 bg-muted/50"
+          )}
+        >
+          <p
+            className={cn(
+              "font-medium text-xs",
+              hasError ? "text-destructive" : "text-muted-foreground"
+            )}
+          >
+            {hasError ? "❌" : "✓"} Tool: {toolData.toolName || "Unknown"}
+            {toolData.callId && (
+              <span className="ml-2 text-muted-foreground text-xs">
+                (ID: {toolData.callId.slice(-8)})
+              </span>
+            )}
+          </p>
+          <details className="mt-2">
+            <summary className="cursor-pointer text-muted-foreground text-xs">
+              {hasError ? "View error" : "View result"}
+            </summary>
+            <pre className="mt-2 max-h-48 overflow-auto rounded bg-muted p-2 text-xs">
+              {resultText}
+            </pre>
+          </details>
+        </div>
+      </div>
+    );
+  };
+
   // Helper: Render a single session item
   const renderSessionItem = (item: SessionItem) => {
     // Render messages
@@ -710,6 +840,19 @@ export function Chatbot({ agentId, agentName }: ChatbotProps) {
     // Render auth_required
     if (item.type === "auth_required") {
       return renderAuthItem(item);
+    }
+
+    // Render tool call results
+    if (
+      item.type === "tool_call_completed" ||
+      item.type === "tool_call_started"
+    ) {
+      return renderToolCallItem(item);
+    }
+
+    // Render waiting_user_input (approvals)
+    if (item.type === "waiting_user_input") {
+      return renderApprovalsItem(item);
     }
 
     // Render step events
