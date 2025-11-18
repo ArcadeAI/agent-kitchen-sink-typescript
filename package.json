@@ -30,6 +30,7 @@
     "db:studio": "turbo -F @gmail-agents/db db:studio",
     "db:generate": "turbo -F @gmail-agents/db db:generate",
     "db:migrate": "turbo -F @gmail-agents/db db:migrate",
+    "db:clear-agent-sessions": "turbo -F @gmail-agents/db db:clear-agent-sessions",
     "db:start": "turbo -F @gmail-agents/db db:start",
     "db:watch": "turbo -F @gmail-agents/db db:watch",
     "db:stop": "turbo -F @gmail-agents/db db:stop",
@@ -37,6 +38,7 @@
   },
   "dependencies": {
     "dotenv": "^17.2.2",
+    "openai": "^6.8.1",
     "zod": "^4.1.11"
   },
   "devDependencies": {

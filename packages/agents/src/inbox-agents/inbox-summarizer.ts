@@ -4,11 +4,13 @@ import arcadeClient, {
   getTools,
   getToolsOpenAI,
 } from "@gmail-agents/arcade";
-import { Agent } from "../openai-agent.js";
+import { Agent as OpenAIAgent, run } from "@openai/agents";
+import { OpenAISDKAgent } from "../openai-agent.js";
 import type {
   AgentConfig,
   AgentEventCallback,
   AgentResponseWithState,
+  AgentRunOptions,
   Message,
   SessionState,
 } from "../types.js";
@@ -20,7 +22,7 @@ import type { Email } from "./types.js";
  * Handles workflow-based email summarization
  * This agent is stateless - all state is passed in and returned
  */
-export class InboxSummarizer extends Agent {
+export class InboxSummarizer extends OpenAISDKAgent {
   private readonly steps: readonly string[] = [
     "initialize-tools",
     "get-emails",
@@ -47,15 +49,7 @@ export class InboxSummarizer extends Agent {
   async runAgent(
     messages: Message[],
     userId: string,
-    options?: {
-      sessionState?: SessionState;
-      persistState?: (
-        state: SessionState,
-        status?: SessionState["status"]
-      ) => Promise<void>;
-      onEvent?: AgentEventCallback;
-      approvals?: Array<{ approvalId: string; approved: boolean }>;
-    }
+    options?: AgentRunOptions
   ): Promise<AgentResponseWithState> {
     const { sessionState, persistState, onEvent, approvals } = options ?? {};
     const state = this.initializeState(sessionState);
@@ -290,9 +284,9 @@ export class InboxSummarizer extends Agent {
       case "initialize-tools":
         return await this.initializeTools(userId, state, onEvent);
       case "get-emails":
-        return this.getEmails(userId, state, onEvent);
+        return await this.getEmails(userId, state, onEvent);
       case "summarize-emails":
-        return this.summarizeEmails(state);
+        return await this.summarizeEmails(state);
       case "assemble-report":
         return this.assembleReport(state);
       default:
@@ -339,6 +333,8 @@ ${Object.entries(summaries)
   }> {
     const tools = await getTools({
       tools: ["Gmail.ListEmails", "Gmail.SendEmail", "Slack.SendMessage"],
+      toolkits: ["GoogleCalendar"],
+      limit: 80,
     });
 
     const authResult = await authorizeTools(
@@ -422,16 +418,27 @@ ${Object.entries(summaries)
     };
   }
 
-  summarizeEmails(state: SessionState): {
+  async summarizeEmails(state: SessionState): Promise<{
     data?: Record<string, unknown>;
-  } {
+  }> {
     const emails = (state.stepData.emails as Email[]) || [];
     const summaries: Record<string, string> = {};
 
     // Placeholder: create simple summaries
-    for (const email of emails) {
-      summaries[email.id] = `Summary of: ${email.subject}`;
-    }
+    const summarizer = new OpenAIAgent({
+      name: "Email Summarizer",
+      model: "gpt-4o-mini",
+      instructions:
+        "You are an expert at summarizing emails. Your task is to get an email and summarize it concisely in a few bullet points.",
+    });
+
+    await Promise.all(
+      emails.map(async (email) => {
+        const message = `The email is from ${email.from} to ${email.to} with the subject "${email.subject}". The email body is: ${email.body}`;
+        const summary = await run(summarizer, message);
+        summaries[email.id] = summary.finalOutput as string;
+      })
+    );
 
     return {
       data: {

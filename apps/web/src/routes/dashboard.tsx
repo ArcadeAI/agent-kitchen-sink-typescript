@@ -5,6 +5,7 @@ import {
   useSearch,
 } from "@tanstack/react-router";
 import { Calendar, CheckCircle2, Inbox } from "lucide-react";
+import { useState } from "react";
 import { Chatbot } from "@/components/chatbot";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,6 +15,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
 import { authClient } from "@/lib/auth-client";
 
 const AGENTS = [
@@ -58,6 +60,7 @@ function RouteComponent() {
   const { session } = Route.useRouteContext();
   const { agentId } = useSearch({ from: "/dashboard" });
   const navigate = useNavigate();
+  const [provider, setProvider] = useState<"openai" | "openrouter">("openai");
 
   const handleAgentSelect = (id: string) => {
     navigate({
@@ -77,7 +80,27 @@ function RouteComponent() {
         </p>
       </div>
       {agentId && selectedAgent ? (
-        <Chatbot agentId={agentId} agentName={selectedAgent.name} />
+        <div className="space-y-4">
+          <div className="flex items-center gap-4">
+            <Label htmlFor="provider-select">Provider:</Label>
+            <select
+              className="w-[200px] rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+              id="provider-select"
+              onChange={(event) =>
+                setProvider(event.target.value as "openai" | "openrouter")
+              }
+              value={provider}
+            >
+              <option value="openai">OpenAI</option>
+              <option value="openrouter">OpenRouter</option>
+            </select>
+          </div>
+          <Chatbot
+            agentId={agentId}
+            agentName={selectedAgent.name}
+            provider={provider}
+          />
+        </div>
       ) : (
         <div>
           <h2 className="mb-6 font-semibold text-2xl">Select an Agent</h2>

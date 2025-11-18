@@ -8,55 +8,29 @@ import {
   type RunToolApprovalItem,
   user,
 } from "@openai/agents";
+import { BaseAgent } from "./base-agent.js";
 import type {
   AgentConfig,
-  AgentEvent,
   AgentEventCallback,
   AgentResponse,
   AgentResponseWithState,
+  AgentRunOptions,
   Message,
   SessionState,
 } from "./types.js";
-import { AuthPattern } from "./types.js";
-
-const DEFAULT_TEMPERATURE = 0.7;
-const DEFAULT_MAX_TOKENS = 1000;
-const DEFAULT_AGENTIC_LEVEL = 0.0;
 
 /**
  * Base agent class that handles conversation history and LLM interactions
  * Uses the @openai/agents framework internally
  */
-export class Agent {
+export class OpenAISDKAgent extends BaseAgent {
   protected openaiAgent: OpenAIAgent;
-  private config: Required<AgentConfig>;
-  agentDescription: string;
-  integrations: string[];
-  authPattern: AuthPattern;
-  agentic: number;
 
   constructor(config: AgentConfig = {}) {
+    super(config);
     if (!process.env.OPENAI_API_KEY) {
       throw new Error("OPENAI_API_KEY environment variable is required");
     }
-
-    this.config = {
-      model: config.model ?? "gpt-4o",
-      systemInstructions:
-        config.systemInstructions ?? "You are a helpful assistant.",
-      temperature: config.temperature ?? DEFAULT_TEMPERATURE,
-      maxTokens: config.maxTokens ?? DEFAULT_MAX_TOKENS,
-      agentDescription: config.agentDescription ?? "",
-      integrations: config.integrations ?? [],
-      authPattern: config.authPattern ?? AuthPattern.JIT,
-      agentic: config.agentic ?? DEFAULT_AGENTIC_LEVEL,
-    };
-
-    // Initialize new fields
-    this.agentDescription = config.agentDescription ?? "";
-    this.integrations = config.integrations ?? [];
-    this.authPattern = config.authPattern ?? AuthPattern.JIT;
-    this.agentic = config.agentic ?? DEFAULT_AGENTIC_LEVEL;
 
     // Create the OpenAI Agents SDK agent instance
     this.openaiAgent = new OpenAIAgent({
@@ -66,151 +40,50 @@ export class Agent {
   }
 
   /**
-   * Helper method to emit events
+   * Emit events for newly generated run items in the current turn
    */
-  protected async emitEvent(
-    onEvent: AgentEventCallback | undefined,
-    event: Omit<AgentEvent, "timestamp">
+  protected async emitEventsForNewItems(
+    newItems: unknown[] | undefined,
+    state: SessionState,
+    onEvent: AgentEventCallback | undefined
   ): Promise<void> {
-    if (onEvent) {
-      const fullEvent: AgentEvent = {
-        ...event,
-        timestamp: Date.now(),
-      };
-      try {
-        await onEvent(fullEvent);
-      } catch (_error) {
-        // Intentionally swallow errors from event callbacks to prevent agent failures
+    if (!Array.isArray(newItems) || newItems.length === 0) {
+      return;
+    }
+
+    for (const candidate of newItems) {
+      if (!candidate || typeof candidate !== "object") {
+        continue;
       }
-    }
-  }
 
-  /**
-   * Helper method to emit auth_required event
-   */
-  protected async emitAuthRequired(
-    onEvent: AgentEventCallback | undefined,
-    options: {
-      data: Record<string, unknown>;
-      state?: SessionState;
-      step?: string;
-      stepIndex?: number;
-    }
-  ): Promise<void> {
-    await this.emitEvent(onEvent, {
-      type: "auth_required",
-      data: options.data,
-      state: options.state,
-      step: options.step,
-      stepIndex: options.stepIndex,
-      requiresExternalAction: true,
-      resumable: true,
-    });
-  }
+      const item = candidate as { type?: string };
 
-  /**
-   * Helper method to emit waiting_user_input event
-   */
-  protected async emitWaitingInput(
-    onEvent: AgentEventCallback | undefined,
-    options: {
-      data: Record<string, unknown>;
-      state?: SessionState;
-      step?: string;
-      stepIndex?: number;
-    }
-  ): Promise<void> {
-    await this.emitEvent(onEvent, {
-      type: "waiting_user_input",
-      data: options.data,
-      state: options.state,
-      step: options.step,
-      stepIndex: options.stepIndex,
-      requiresExternalAction: true,
-      resumable: true,
-    });
-  }
-
-  /**
-   * Helper method to emit tool_call_started event
-   */
-  protected async emitToolCallStarted(
-    onEvent: AgentEventCallback | undefined,
-    options: {
-      toolName: string;
-      state?: SessionState;
-      step?: string;
-      stepIndex?: number;
-    }
-  ): Promise<void> {
-    await this.emitEvent(onEvent, {
-      type: "tool_call_started",
-      data: { toolName: options.toolName },
-      state: options.state,
-      step: options.step,
-      stepIndex: options.stepIndex,
-    });
-  }
-
-  /**
-   * Helper method to emit tool_call_completed event
-   */
-  protected async emitToolCallCompleted(
-    onEvent: AgentEventCallback | undefined,
-    options: {
-      toolName: string;
-      result: unknown;
-      state?: SessionState;
-      step?: string;
-      stepIndex?: number;
-    }
-  ): Promise<void> {
-    await this.emitEvent(onEvent, {
-      type: "tool_call_completed",
-      data: { toolName: options.toolName, result: options.result },
-      state: options.state,
-      step: options.step,
-      stepIndex: options.stepIndex,
-    });
-  }
-
-  /**
-   * Helper method to emit events for tool execution results
-   * Extracts tool outputs from the run state and emits them as events
-   */
-  protected async emitToolExecutionResults(
-    onEvent: AgentEventCallback | undefined,
-    result: any,
-    state?: SessionState
-  ): Promise<void> {
-    // Get the state data via toJSON() which provides the generatedItems
-    if (!result?.state || typeof result.state.toJSON !== "function") {
-      return;
-    }
-
-    const stateData = result.state.toJSON();
-    if (!stateData?.generatedItems) {
-      return;
-    }
-
-    // Extract tool execution results from the state
-    const generatedItems = stateData.generatedItems || [];
-
-    for (const item of generatedItems) {
-      // Emit events for tool call outputs (execution results)
-      if (item.type === "tool_call_output_item" && item.rawItem) {
-        const toolName = item.rawItem.name || "unknown_tool";
-        const output = item.output || item.rawItem.output;
-
-        await this.emitEvent(onEvent, {
-          type: "tool_call_completed",
-          data: {
+      switch (item.type) {
+        case "tool_call_item": {
+          const { toolName, callId, args } =
+            this.extractToolCallDetails(candidate);
+          await this.emitToolCallStarted(onEvent, {
+            toolName,
+            callId,
+            arguments: args,
+            state,
+          });
+          break;
+        }
+        case "tool_call_output_item": {
+          const { toolName, callId, output, args } =
+            this.extractToolCallOutputDetails(candidate);
+          await this.emitToolCallCompleted(onEvent, {
             toolName,
             result: output,
-            callId: item.rawItem.callId,
-          },
-          state,
-        });
+            callId,
+            arguments: args,
+            state,
+          });
+          break;
+        }
+        default:
+          break;
       }
     }
   }
@@ -224,15 +97,7 @@ export class Agent {
   async runAgent(
     messages: Message[],
     _userId: string,
-    options?: {
-      sessionState?: SessionState;
-      persistState?: (
-        state: SessionState,
-        status?: SessionState["status"]
-      ) => Promise<void>;
-      onEvent?: AgentEventCallback;
-      approvals?: Array<{ approvalId: string; approved: boolean }>;
-    }
+    options?: AgentRunOptions
   ): Promise<AgentResponseWithState> {
     const { sessionState, persistState, onEvent, approvals } = options ?? {};
 
@@ -291,12 +156,10 @@ export class Agent {
         const status: SessionState["status"] = "waiting_input";
         state.status = status;
 
+        await this.emitEventsForNewItems(result.newItems, state, onEvent);
+
         // Persist the state
         await this.persistStateIfNeeded(persistState, state);
-
-        // Emit any tool execution results that happened before this interruption
-        // This allows the UI to show errors or results from previous tool calls
-        await this.emitToolExecutionResults(onEvent, result, state);
 
         // We will return all the interruptions as approval requests to the UI/client so it can generate
         // the UI for approvals
@@ -323,6 +186,8 @@ export class Agent {
       const finalOutput = this.extractFinalOutput(result);
       const metadata = this.buildMetadata(result);
       const state = this.prepareSessionState(sessionState);
+
+      await this.emitEventsForNewItems(result.newItems, state, onEvent);
 
       await this.emitEvent(onEvent, {
         type: "state_updated",
@@ -397,81 +262,11 @@ export class Agent {
     return metadata;
   }
 
-  private prepareSessionState(sessionState?: SessionState): SessionState {
-    return (
-      sessionState || {
-        currentStep: 0,
-        stepData: {},
-        status: "active",
-      }
-    );
-  }
-
-  private async persistStateIfNeeded(
-    persistState:
-      | ((
-          stateToSave: SessionState,
-          status?: SessionState["status"]
-        ) => Promise<void>)
-      | undefined,
-    state: SessionState
-  ): Promise<void> {
-    if (persistState) {
-      try {
-        await persistState(state, state.status || "active");
-      } catch (_error) {
-        // Don't throw - state persistence failure shouldn't break the agent response
-      }
-    }
-  }
-
-  private async handleAgentError(
-    error: unknown,
-    onEvent?: AgentEventCallback
-  ): Promise<never> {
-    const errorMessage =
-      error instanceof Error ? error.message : "Unknown error";
-
-    await this.emitEvent(onEvent, {
-      type: "error",
-      error: errorMessage,
-    });
-
-    if (error instanceof Error) {
-      throw new Error(`Agent processing failed: ${error.message}`);
-    }
-    throw new Error("Agent processing failed with unknown error");
-  }
-
-  /**
-   * Get the current configuration
-   */
-  getConfig(): Required<AgentConfig> {
-    return { ...this.config };
-  }
-
   /**
    * Update the agent configuration
    */
   updateConfig(config: Partial<AgentConfig>): void {
-    this.config = {
-      ...this.config,
-      ...config,
-    };
-
-    // Update new fields if provided
-    if (config.agentDescription !== undefined) {
-      this.agentDescription = config.agentDescription;
-    }
-    if (config.integrations !== undefined) {
-      this.integrations = config.integrations;
-    }
-    if (config.authPattern !== undefined) {
-      this.authPattern = config.authPattern;
-    }
-    if (config.agentic !== undefined) {
-      this.agentic = config.agentic;
-    }
+    super.updateConfig(config);
 
     // Update the OpenAI agent's instructions if systemInstructions changed
     if (config.systemInstructions !== undefined) {
@@ -484,5 +279,141 @@ export class Agent {
 
   addTools(tools: FunctionTool[]): void {
     this.openaiAgent.tools = [...(this.openaiAgent.tools || []), ...tools];
+  }
+
+  private extractToolCallDetails(item: unknown): {
+    toolName: string;
+    callId?: string;
+    args?: unknown;
+  } {
+    const rawItem = this.getRawRunItem(item);
+    return {
+      toolName: this.getToolName(rawItem),
+      callId: this.getToolCallId(rawItem),
+      args: this.getToolCallArguments(rawItem),
+    };
+  }
+
+  private extractToolCallOutputDetails(item: unknown): {
+    toolName: string;
+    callId?: string;
+    output: unknown;
+    args?: unknown;
+  } {
+    const rawItem = this.getRawRunItem(item);
+    const output =
+      (item as { output?: unknown })?.output ??
+      (rawItem && typeof rawItem === "object" && "output" in rawItem
+        ? (rawItem as { output?: unknown }).output
+        : undefined);
+
+    return {
+      toolName: this.getToolName(rawItem),
+      callId: this.getToolCallId(rawItem),
+      output,
+      args: this.getToolCallArguments(rawItem),
+    };
+  }
+
+  private getRawRunItem(item: unknown): Record<string, unknown> | undefined {
+    if (!item || typeof item !== "object") {
+      return;
+    }
+
+    const rawItem = (item as { rawItem?: unknown }).rawItem;
+    if (rawItem && typeof rawItem === "object") {
+      return rawItem as Record<string, unknown>;
+    }
+
+    return;
+  }
+
+  private getToolName(rawItem?: Record<string, unknown>): string {
+    if (!rawItem) {
+      return "unknown_tool";
+    }
+
+    const candidates: unknown[] = [
+      (rawItem as { name?: unknown }).name,
+      (rawItem as { function?: { name?: unknown } }).function?.name,
+      (rawItem as { tool?: { name?: unknown } }).tool?.name,
+    ];
+
+    for (const candidate of candidates) {
+      if (typeof candidate === "string" && candidate.length > 0) {
+        return candidate;
+      }
+    }
+
+    return "unknown_tool";
+  }
+
+  private getToolCallId(rawItem?: Record<string, unknown>): string | undefined {
+    if (!rawItem) {
+      return;
+    }
+
+    const candidates: unknown[] = [
+      (rawItem as { callId?: unknown }).callId,
+      (rawItem as { id?: unknown }).id,
+      (rawItem as { toolCallId?: unknown }).toolCallId,
+      (rawItem as { call?: { id?: unknown } }).call?.id,
+    ];
+
+    for (const candidate of candidates) {
+      if (typeof candidate === "string" && candidate.length > 0) {
+        return candidate;
+      }
+    }
+
+    return;
+  }
+
+  private getToolCallArguments(rawItem?: Record<string, unknown>): unknown {
+    if (!rawItem) {
+      return;
+    }
+
+    const candidateValues: unknown[] = [];
+
+    if ("arguments" in rawItem) {
+      candidateValues.push((rawItem as { arguments?: unknown }).arguments);
+    }
+
+    const rawFunction = (
+      rawItem as {
+        function?: { arguments?: unknown };
+      }
+    ).function;
+    if (rawFunction && typeof rawFunction === "object") {
+      candidateValues.push(rawFunction.arguments);
+    }
+
+    const rawCall = (
+      rawItem as {
+        call?: { arguments?: unknown };
+      }
+    ).call;
+    if (rawCall && typeof rawCall === "object") {
+      candidateValues.push(rawCall.arguments);
+    }
+
+    for (const candidate of candidateValues) {
+      if (candidate === undefined || candidate === null) {
+        continue;
+      }
+
+      if (typeof candidate === "string") {
+        try {
+          return JSON.parse(candidate);
+        } catch (_error) {
+          return candidate;
+        }
+      }
+
+      return candidate;
+    }
+
+    return;
   }
 }

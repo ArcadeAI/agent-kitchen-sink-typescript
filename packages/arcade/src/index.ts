@@ -19,10 +19,11 @@ export {
   createStdioTransport,
   createStreamableHTTPTransport,
 } from "./mcp-client-types.js";
-export type { AuthEvent } from "./tools-utils.js";
+export type { AuthEvent, OpenAIFormattedTool } from "./tools-utils.js";
 export {
   AuthorizationPendingError,
   authorizeTools,
   getTools,
   getToolsOpenAI,
+  getToolsOpenAIFormatted,
 } from "./tools-utils.js";

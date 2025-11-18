@@ -30,6 +30,7 @@ type SessionItem = {
 type ChatbotProps = {
   agentId: string;
   agentName: string;
+  provider?: "openai" | "openrouter";
 };
 
 type SessionsResponse = Awaited<ReturnType<typeof api.api.agents.sessions.get>>;
@@ -37,7 +38,20 @@ type SessionListItem = NonNullable<
   NonNullable<SessionsResponse["data"]>["sessions"]
 >[number];
 
-export function Chatbot({ agentId, agentName }: ChatbotProps) {
+const getSessionStorageKey = (
+  agentId: string,
+  provider: "openai" | "openrouter"
+): string => `session_${provider}_${agentId}`;
+
+type SessionsResponseData = Awaited<
+  ReturnType<typeof api.api.agents.sessions.get>
+>;
+
+export function Chatbot({
+  agentId,
+  agentName,
+  provider = "openai",
+}: ChatbotProps) {
   const [items, setItems] = useState<SessionItem[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -64,18 +78,21 @@ export function Chatbot({ agentId, agentName }: ChatbotProps) {
   const fetchSessions = useCallback(async () => {
     setIsLoadingSessions(true);
     try {
-      const response = await api.api.agents.sessions.get({
+      const response = (await api.api.agents.sessions.get({
         query: { agentId },
-      });
+      })) as SessionsResponseData;
       if (response.data && !response.error && response.data.sessions) {
         setSessions(response.data.sessions);
+      } else {
+        setSessions([]);
       }
     } catch (_error) {
+      setSessions([]);
       // Silently handle fetch errors
     } finally {
       setIsLoadingSessions(false);
     }
-  }, [agentId]);
+  }, [agentId, provider]);
 
   // Helper: Convert API session items to SessionItem type
   const convertSessionItems = useCallback(
@@ -421,7 +438,10 @@ export function Chatbot({ agentId, agentName }: ChatbotProps) {
         }
         setSessionId(sessionIdValue);
         setSessionStatus(session.status || "active");
-        localStorage.setItem(`session_${agentId}`, sessionIdValue);
+        localStorage.setItem(
+          getSessionStorageKey(agentId, provider),
+          sessionIdValue
+        );
 
         const sessionItems = convertSessionItems(session.items || []);
         setItems(sessionItems);
@@ -439,6 +459,7 @@ export function Chatbot({ agentId, agentName }: ChatbotProps) {
     },
     [
       agentId,
+      provider,
       convertSessionItems,
       filterEventItems,
       updateLastEventTimestamp,
@@ -452,6 +473,7 @@ export function Chatbot({ agentId, agentName }: ChatbotProps) {
     try {
       const createResponse = await api.api.agents.sessions.post({
         agentId,
+        provider,
       });
 
       if (
@@ -461,7 +483,10 @@ export function Chatbot({ agentId, agentName }: ChatbotProps) {
       ) {
         const newSessionId = createResponse.data.sessionId;
         setSessionId(newSessionId);
-        localStorage.setItem(`session_${agentId}`, newSessionId);
+        localStorage.setItem(
+          getSessionStorageKey(agentId, provider),
+          newSessionId
+        );
         setItems([]);
         // Refresh sessions list
         await fetchSessions();
@@ -471,7 +496,7 @@ export function Chatbot({ agentId, agentName }: ChatbotProps) {
     } catch (_error) {
       // Silently handle session creation errors
     }
-  }, [agentId, fetchSessions, loadSession]);
+  }, [agentId, provider, fetchSessions, loadSession]);
 
   // Fetch sessions on mount and when agentId changes
   useEffect(() => {
@@ -482,8 +507,15 @@ export function Chatbot({ agentId, agentName }: ChatbotProps) {
   useEffect(() => {
     const initializeSession = async () => {
       try {
-        // Check if there's a sessionId in localStorage for this agent
-        const storedSessionId = localStorage.getItem(`session_${agentId}`);
+        const storageKey = getSessionStorageKey(agentId, provider);
+        // Cleanup legacy storage key if it exists
+        const legacyKey = `session_${agentId}`;
+        if (localStorage.getItem(legacyKey) && legacyKey !== storageKey) {
+          localStorage.removeItem(legacyKey);
+        }
+
+        // Check if there's a sessionId in localStorage for this agent/provider combo
+        const storedSessionId = localStorage.getItem(storageKey);
 
         if (storedSessionId) {
           // Try to load existing session
@@ -496,6 +528,8 @@ export function Chatbot({ agentId, agentName }: ChatbotProps) {
         }
 
         // Create new session if no stored session
+        setSessionId(null);
+        setItems([]);
         await createNewSession();
       } catch (_error) {
         // Silently handle initialization errors
@@ -503,7 +537,7 @@ export function Chatbot({ agentId, agentName }: ChatbotProps) {
     };
 
     initializeSession();
-  }, [agentId, createNewSession, loadSession]);
+  }, [agentId, provider, createNewSession, loadSession]);
 
   // Helper: Check if message can be sent
   const canSendMessage = (): boolean => {

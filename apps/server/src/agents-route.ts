@@ -1,10 +1,8 @@
-import type {
-  AgentResponseWithState,
-  Message,
-  SessionState,
-} from "@gmail-agents/agents";
+import type { Agent, Message, SessionState } from "@gmail-agents/agents";
 import {
   type AgentConfig,
+  OpenRouterAgent,
+  type OpenRouterAgentConfig,
   ReactAgent,
   type ReactAgentConfig,
 } from "@gmail-agents/agents";
@@ -19,23 +17,6 @@ import prisma from "@gmail-agents/db";
 import { Elysia, t } from "elysia";
 import { HttpStatus } from "./constants";
 
-// Type for agents that have the runAgent method with persistence callback
-type AgentWithPersistence = {
-  runAgent: (
-    messages: Message[],
-    userId: string,
-    options?: {
-      sessionState?: SessionState;
-      persistState?: (
-        state: SessionState,
-        status?: SessionState["status"]
-      ) => Promise<void>;
-      onEvent?: AgentEventCallback;
-      approvals?: Array<{ approvalId: string; approved: boolean }>;
-    }
-  ) => Promise<AgentResponseWithState>;
-};
-
 const AGENT_CONFIGS: Record<
   string,
   Partial<AgentConfig> | Partial<ReactAgentConfig>
@@ -47,12 +28,35 @@ const AGENT_CONFIGS: Record<
   "inbox-prioritizer": {
     systemInstructions:
       "You are an inbox prioritization assistant. Help users prioritize their emails by identifying urgent and important messages. Focus on helping users focus on what matters most and manage their email workflow effectively.",
-    toolkits: ["gmail"],
+    toolkits: ["Gmail"],
   },
   "meeting-prep": {
-    systemInstructions:
-      "You are a meeting preparation assistant. Help users prepare for meetings by analyzing relevant emails, extracting key information, and summarizing important points. Focus on providing context and action items related to upcoming meetings.",
-    toolkits: ["gmail"],
+    systemInstructions: `You are a meeting preparation assistant. Help users prepare for meetings by analyzing relevant emails, extracting key information, and summarizing important points.
+      Focus on providing context and action items related to upcoming meetings. Today's date is ${
+        new Date().toISOString().split("T")[0]
+      }.
+      When the user does not specify a specific calendar, assume they mean their primary calendar.`,
+    tools: [
+      "Gmail.SendEmail",
+      "Gmail.SendDraftEmail",
+      "Gmail.WriteDraftEmail",
+      "Gmail.UpdateDraftEmail",
+      "Gmail.DeleteDraftEmail",
+      "Gmail.TrashEmail",
+      "Gmail.ListDraftEmails",
+      "Gmail.ListEmailsByHeader",
+      "Gmail.ListEmails",
+      "Gmail.SearchThreads",
+      "Gmail.ListThreads",
+      "Gmail.GetThread",
+      "GoogleCalendar.CreateEvent",
+      "GoogleCalendar.ListCalendars",
+      "GoogleCalendar.CreateEvent",
+      "GoogleCalendar.ListEvents",
+      "GoogleCalendar.UpdateEvent",
+      "GoogleCalendar.DeleteEvent",
+    ],
+    toolLimit: 100,
   },
 };
 
@@ -61,16 +65,26 @@ const AGENT_CONFIGS: Record<
  */
 async function createAgent(
   agentId: string,
-  userId: string
-): Promise<AgentWithPersistence> {
+  userId: string,
+  provider: "openai" | "openrouter" = "openai"
+): Promise<Agent> {
   const config = AGENT_CONFIGS[agentId];
   if (!config) {
     throw new Error(`Unknown agent ID: ${agentId}`);
   }
 
   if (agentId === "inbox-summarizer") {
-    return new InboxSummarizer(config) as AgentWithPersistence;
+    // InboxSummarizer always uses OpenAI agent for now
+    return new InboxSummarizer(config);
   }
+
+  if (provider === "openrouter") {
+    return await OpenRouterAgent.create({
+      ...config,
+      userId,
+    } as OpenRouterAgentConfig);
+  }
+
   return await ReactAgent.create({ ...config, userId } as ReactAgentConfig);
 }
 
@@ -102,6 +116,15 @@ export const agentsRoute = new Elysia()
           return { error: `Unknown agent ID: ${body.agentId}` };
         }
 
+        // Validate provider if provided
+        const provider = (body.provider as "openai" | "openrouter") || "openai";
+        if (provider !== "openai" && provider !== "openrouter") {
+          set.status = HttpStatus.BAD_REQUEST;
+          return {
+            error: "Invalid provider. Must be 'openai' or 'openrouter'",
+          };
+        }
+
         // Create new session
         const agentSession = await prisma.agentSession.create({
           data: {
@@ -109,7 +132,9 @@ export const agentsRoute = new Elysia()
             agentId: body.agentId,
             currentStep: 0,
             status: "active",
-            stateData: {},
+            stateData: {
+              provider, // Store provider in stateData for later use
+            },
           },
         });
 
@@ -143,6 +168,9 @@ export const agentsRoute = new Elysia()
       body: t.Object({
         agentId: t.String(),
         initialMessage: t.Optional(t.String()),
+        provider: t.Optional(
+          t.Union([t.Literal("openai"), t.Literal("openrouter")])
+        ),
       }),
     }
   )
@@ -489,8 +517,17 @@ export const agentsRoute = new Elysia()
           messages.push(newUserMessage);
         }
 
+        // Get provider from session stateData or default to openai
+        const sessionProvider =
+          (agentSession.stateData as { provider?: "openai" | "openrouter" })
+            ?.provider || "openai";
+
         // Create agent instance (stateless)
-        const agent = await createAgent(agentSession.agentId, session.user.id);
+        const agent = await createAgent(
+          agentSession.agentId,
+          session.user.id,
+          sessionProvider
+        );
 
         // Create persistence callback for the agent
         const persistState = async (
@@ -738,8 +775,17 @@ export const agentsRoute = new Elysia()
             })
           );
 
+        // Get provider from session stateData or default to openai
+        const sessionProvider =
+          (agentSession.stateData as { provider?: "openai" | "openrouter" })
+            ?.provider || "openai";
+
         // Create agent instance (stateless)
-        const agent = await createAgent(agentSession.agentId, session.user.id);
+        const agent = await createAgent(
+          agentSession.agentId,
+          session.user.id,
+          sessionProvider
+        );
 
         // Create persistence callback for the agent
         const persistState = async (

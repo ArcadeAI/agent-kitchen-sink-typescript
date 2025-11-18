@@ -17,6 +17,7 @@
     "db:studio": "prisma studio",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
+    "db:clear-agent-sessions": "bunx tsx src/scripts/clear-agent-sessions.ts",
     "db:start": "docker compose up -d",
     "db:watch": "docker compose up",
     "db:stop": "docker compose stop",

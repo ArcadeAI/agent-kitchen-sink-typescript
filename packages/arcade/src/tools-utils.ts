@@ -113,6 +113,102 @@ export class AuthorizationPendingError extends Error {
   }
 }
 
+/**
+ * OpenAI-formatted tool definition with executor and approval metadata
+ */
+export type OpenAIFormattedTool = {
+  /** OpenAI function calling format tool definition */
+  definition: {
+    type: "function";
+    function: {
+      name: string;
+      description: string;
+      parameters: Record<string, unknown>;
+    };
+  };
+  /** Executor function that can run the tool */
+  execute: (args: Record<string, unknown>) => Promise<unknown>;
+  /** Whether this tool requires approval before execution */
+  needsApproval: boolean;
+  /** Original tool qualified name */
+  qualifiedName: string;
+};
+
+/**
+ * Get Arcade tools formatted for OpenAI function calling
+ * Returns tools with OpenAI-compatible definitions, executors, and approval metadata
+ */
+export async function getToolsOpenAIFormatted({
+  toolkits = [],
+  tools = [],
+  limit = 30,
+  userId,
+}: GetToolsProps): Promise<OpenAIFormattedTool[]> {
+  if (!userId) {
+    throw new Error("userId is required");
+  }
+
+  if (toolkits.length === 0 && tools.length === 0) {
+    throw new Error("At least one tool or toolkit must be provided");
+  }
+
+  // First, get all the original tool definitions
+  const arcadeTools = await getTools({ toolkits, tools, limit });
+
+  // Get OpenAI-formatted tool definitions from Arcade
+  const formattedTools: OpenAIFormattedTool[] = [];
+
+  // Process each tool: get formatted definition and create executor
+  for (const originalTool of arcadeTools) {
+    try {
+      // Get OpenAI-formatted definition
+      const formatted = (await arcadeClient.tools.formatted.get(
+        originalTool.qualified_name,
+        {
+          format: "openai",
+        }
+      )) as
+        | {
+            type: "function";
+            function: {
+              name: string;
+              description: string;
+              parameters: Record<string, unknown>;
+            };
+          }
+        | null
+        | undefined;
+
+      if (formatted?.type === "function" && formatted.function) {
+        // Create Zod tool for execution
+        const zodTools = toZod({
+          tools: [originalTool],
+          client: arcadeClient,
+          userId,
+          executeFactory: executeOrAuthorizeZodTool,
+        });
+
+        const zodTool = zodTools[0];
+        if (zodTool) {
+          const needsApproval = TOOLS_WITH_APPROVAL.includes(zodTool.name);
+
+          formattedTools.push({
+            definition: formatted as OpenAIFormattedTool["definition"],
+            execute: async (args: Record<string, unknown>) =>
+              await zodTool.execute(args),
+            needsApproval,
+            qualifiedName: originalTool.qualified_name,
+          });
+        }
+      }
+    } catch (_error) {
+      // Skip tools that fail to format (shouldn't happen, but be defensive)
+    }
+  }
+
+  return formattedTools;
+}
+
 export async function authorizeTools(
   tools: ToolDefinition[],
   userId: string,

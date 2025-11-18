@@ -200,3 +200,16 @@ export interface AgentResponseWithState extends AgentResponse {
    */
   status?: SessionStatus;
 }
+
+/**
+ * Options for running an agent
+ */
+export type AgentRunOptions = {
+  sessionState?: SessionState;
+  persistState?: (
+    state: SessionState,
+    status?: SessionState["status"]
+  ) => Promise<void>;
+  onEvent?: AgentEventCallback;
+  approvals?: Array<{ approvalId: string; approved: boolean }>;
+};

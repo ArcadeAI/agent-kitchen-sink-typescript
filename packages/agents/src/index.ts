@@ -22,10 +22,14 @@ try {
   }
 }
 
+export type { Agent } from "./base-agent.js";
 // biome-ignore lint/performance/noBarrelFile: This is an intentional index/barrel file for the agents package
-export { Agent } from "./openai-agent.js";
+export { BaseAgent } from "./base-agent.js";
+export { OpenAISDKAgent } from "./openai-agent.js";
 export type { ReactAgentConfig } from "./openai-react-agent.js";
 export { ReactAgent } from "./openai-react-agent.js";
+export type { OpenRouterAgentConfig } from "./openrouter-agent.js";
+export { OpenRouterAgent } from "./openrouter-agent.js";
 export type {
   AgentConfig,
   AgentError,
@@ -34,6 +38,7 @@ export type {
   AgentEventType,
   AgentResponse,
   AgentResponseWithState,
+  AgentRunOptions,
   Message,
   MessageRole,
   SessionState,

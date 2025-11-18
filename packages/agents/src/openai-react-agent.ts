@@ -1,11 +1,10 @@
 import { getToolsOpenAI } from "@gmail-agents/arcade";
-import { Agent } from "./openai-agent.js";
+import { OpenAISDKAgent } from "./openai-agent.js";
 import type {
   AgentConfig,
-  AgentEventCallback,
   AgentResponseWithState,
+  AgentRunOptions,
   Message,
-  SessionState,
 } from "./types.js";
 
 const DEFAULT_TOOL_LIMIT = 30;
@@ -28,7 +27,7 @@ export interface ReactAgentConfig extends AgentConfig {
  * React agent that extends the base Agent with tool-calling capabilities
  * Uses Arcade tools via the getToolsOpenAI function
  */
-export class ReactAgent extends Agent {
+export class ReactAgent extends OpenAISDKAgent {
   private readonly toolkits: string[];
   private readonly tools: string[];
   private readonly toolLimit: number;
@@ -69,15 +68,7 @@ export class ReactAgent extends Agent {
   async runAgent(
     messages: Message[],
     _userId: string,
-    options?: {
-      sessionState?: SessionState;
-      persistState?: (
-        state: SessionState,
-        status?: SessionState["status"]
-      ) => Promise<void>;
-      onEvent?: AgentEventCallback;
-      approvals?: Array<{ approvalId: string; approved: boolean }>;
-    }
+    options?: AgentRunOptions
   ): Promise<AgentResponseWithState> {
     return super.runAgent(messages, _userId, options);
   }

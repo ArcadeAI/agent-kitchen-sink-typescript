@@ -33,6 +33,9 @@
       "cache": false,
       "persistent": true
     },
+    "db:clear-agent-sessions": {
+      "cache": false
+    },
     "db:start": {
       "cache": false,
       "persistent": true
