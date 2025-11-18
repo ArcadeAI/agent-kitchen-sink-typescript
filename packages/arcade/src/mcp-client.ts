@@ -54,7 +54,9 @@ export class MCPClient {
       } else {
         const _exhaustive: never = transportConfig;
         throw new Error(
-          `Unsupported transport type: ${(_exhaustive as { type: string }).type}`
+          `Unsupported transport type: ${
+            (_exhaustive as { type: string }).type
+          }`
         );
       }
 
@@ -160,7 +162,9 @@ export class MCPClient {
     if (this.client) {
       try {
         await this.client.close();
-      } catch (_error) {}
+      } catch (_error) {
+        // we ignore the error here
+      }
     }
     this.client = null;
     this.transport = null;

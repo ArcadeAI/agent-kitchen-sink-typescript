@@ -65,7 +65,7 @@ export class ReactAgent extends OpenAISDKAgent {
    * @param userId - User ID for context
    * @param options - Optional configuration for session state, persistence, and events
    */
-  async runAgent(
+  runAgent(
     messages: Message[],
     _userId: string,
     options?: AgentRunOptions
