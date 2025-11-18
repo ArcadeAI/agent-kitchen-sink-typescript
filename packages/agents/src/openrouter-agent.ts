@@ -44,7 +44,8 @@ export interface OpenRouterAgentConfig extends AgentConfig {
  */
 export class OpenRouterAgent extends BaseAgent {
   private readonly openaiClient: OpenAI;
-  private readonly tools: OpenAIFormattedTool[] = [];
+  // biome-ignore lint/style/useReadonlyClassProperties: tools are reassigned via external factory
+  private tools: OpenAIFormattedTool[] = [];
   private readonly toolkits: string[];
   private readonly toolLimit: number;
   private readonly userId?: string;

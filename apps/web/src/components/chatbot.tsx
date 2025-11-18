@@ -798,30 +798,51 @@ export function Chatbot({
       toolName?: string;
       result?: string | object;
       callId?: string;
+      arguments?: string | Record<string, unknown>;
     };
 
-    let resultText = "";
+    const isStarted = item.type === "tool_call_started";
+    let resultText: string | null = null;
     let hasError = false;
 
-    try {
-      // Parse the result if it's a string
-      const resultObj =
-        typeof toolData.result === "string"
-          ? JSON.parse(toolData.result)
-          : toolData.result;
+    if (toolData.result !== undefined) {
+      try {
+        // Parse the result if it's a string
+        const resultObj =
+          typeof toolData.result === "string"
+            ? JSON.parse(toolData.result)
+            : toolData.result;
 
-      // Check if this is an error result
-      if (resultObj?.output?.error) {
-        hasError = true;
-        resultText = resultObj.output.error.message || "Tool execution failed";
-      } else {
-        resultText = JSON.stringify(resultObj, null, 2);
+        // Check if this is an error result
+        if (resultObj?.output?.error) {
+          hasError = true;
+          resultText =
+            resultObj.output.error.message || "Tool execution failed";
+        } else {
+          resultText = JSON.stringify(resultObj, null, 2);
+        }
+      } catch (_e) {
+        resultText =
+          typeof toolData.result === "string"
+            ? toolData.result
+            : JSON.stringify(toolData.result, null, 2);
       }
-    } catch (_e) {
-      resultText =
-        typeof toolData.result === "string"
-          ? toolData.result
-          : JSON.stringify(toolData.result, null, 2);
+    }
+
+    let argumentText: string | null = null;
+    if (toolData.arguments !== undefined) {
+      try {
+        const argsObj =
+          typeof toolData.arguments === "string"
+            ? JSON.parse(toolData.arguments)
+            : toolData.arguments;
+        argumentText = JSON.stringify(argsObj, null, 2);
+      } catch (_e) {
+        argumentText =
+          typeof toolData.arguments === "string"
+            ? toolData.arguments
+            : JSON.stringify(toolData.arguments, null, 2);
+      }
     }
 
     return (
@@ -840,21 +861,34 @@ export function Chatbot({
               hasError ? "text-destructive" : "text-muted-foreground"
             )}
           >
-            {hasError ? "❌" : "✓"} Tool: {toolData.toolName || "Unknown"}
+            {hasError ? "❌" : isStarted ? "⚙️" : "✓"} Tool:{" "}
+            {toolData.toolName || "Unknown"}
             {toolData.callId && (
               <span className="ml-2 text-muted-foreground text-xs">
                 (ID: {toolData.callId.slice(-8)})
               </span>
             )}
           </p>
-          <details className="mt-2">
-            <summary className="cursor-pointer text-muted-foreground text-xs">
-              {hasError ? "View error" : "View result"}
-            </summary>
-            <pre className="mt-2 max-h-48 overflow-auto rounded bg-muted p-2 text-xs">
-              {resultText}
-            </pre>
-          </details>
+          {argumentText && (
+            <details className="mt-2">
+              <summary className="cursor-pointer text-muted-foreground text-xs">
+                View arguments
+              </summary>
+              <pre className="mt-2 max-h-48 overflow-auto rounded bg-muted p-2 text-xs">
+                {argumentText}
+              </pre>
+            </details>
+          )}
+          {resultText && (
+            <details className="mt-2">
+              <summary className="cursor-pointer text-muted-foreground text-xs">
+                {hasError ? "View error" : "View result"}
+              </summary>
+              <pre className="mt-2 max-h-48 overflow-auto rounded bg-muted p-2 text-xs">
+                {resultText}
+              </pre>
+            </details>
+          )}
         </div>
       </div>
     );

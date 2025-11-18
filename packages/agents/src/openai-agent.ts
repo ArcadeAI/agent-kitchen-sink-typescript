@@ -332,88 +332,26 @@ export class OpenAISDKAgent extends BaseAgent {
     if (!rawItem) {
       return "unknown_tool";
     }
-
-    const candidates: unknown[] = [
-      (rawItem as { name?: unknown }).name,
-      (rawItem as { function?: { name?: unknown } }).function?.name,
-      (rawItem as { tool?: { name?: unknown } }).tool?.name,
-    ];
-
-    for (const candidate of candidates) {
-      if (typeof candidate === "string" && candidate.length > 0) {
-        return candidate;
-      }
-    }
-
-    return "unknown_tool";
+    return (rawItem as { name?: unknown }).name as string;
   }
 
   private getToolCallId(rawItem?: Record<string, unknown>): string | undefined {
     if (!rawItem) {
       return;
     }
-
-    const candidates: unknown[] = [
-      (rawItem as { callId?: unknown }).callId,
-      (rawItem as { id?: unknown }).id,
-      (rawItem as { toolCallId?: unknown }).toolCallId,
-      (rawItem as { call?: { id?: unknown } }).call?.id,
-    ];
-
-    for (const candidate of candidates) {
-      if (typeof candidate === "string" && candidate.length > 0) {
-        return candidate;
-      }
-    }
-
-    return;
+    return (rawItem as { callId?: unknown }).callId as string;
   }
 
-  private getToolCallArguments(rawItem?: Record<string, unknown>): unknown {
+  private getToolCallArguments(
+    rawItem?: Record<string, unknown>
+  ): object | undefined {
     if (!rawItem) {
       return;
     }
-
-    const candidateValues: unknown[] = [];
-
-    if ("arguments" in rawItem) {
-      candidateValues.push((rawItem as { arguments?: unknown }).arguments);
+    const argument_string = (rawItem as { arguments?: unknown })
+      .arguments as string;
+    if (argument_string) {
+      return JSON.parse(argument_string);
     }
-
-    const rawFunction = (
-      rawItem as {
-        function?: { arguments?: unknown };
-      }
-    ).function;
-    if (rawFunction && typeof rawFunction === "object") {
-      candidateValues.push(rawFunction.arguments);
-    }
-
-    const rawCall = (
-      rawItem as {
-        call?: { arguments?: unknown };
-      }
-    ).call;
-    if (rawCall && typeof rawCall === "object") {
-      candidateValues.push(rawCall.arguments);
-    }
-
-    for (const candidate of candidateValues) {
-      if (candidate === undefined || candidate === null) {
-        continue;
-      }
-
-      if (typeof candidate === "string") {
-        try {
-          return JSON.parse(candidate);
-        } catch (_error) {
-          return candidate;
-        }
-      }
-
-      return candidate;
-    }
-
-    return;
   }
 }
